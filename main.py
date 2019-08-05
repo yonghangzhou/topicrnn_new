@@ -20,15 +20,18 @@ parser.add_argument("--batch_size", type=int, default=200, help="batch size")
 parser.add_argument("--num_epochs", type=int, default=100, help="number of epochs")
 parser.add_argument("--frequency_limit", type=int, default=5, help="limit of repeat for vocabulary")
 parser.add_argument("--max_seqlen", type=int, default=100, help="maximum sequence length")
-parser.add_argument("--num_units", type=int, default=600, help="num of units")
+parser.add_argument("--num_units", type=int, default=200, help="num of units")
 parser.add_argument("--num_hidden", type=int, default=500, help="hidden units of inference network")
-parser.add_argument("--dim_emb", type=int, default=300, help="dimension of embedding")
+parser.add_argument("--dim_emb", type=int, default=200, help="dimension of embedding")
 parser.add_argument("--num_topics", type=int, default=5, help="number of topics")
 parser.add_argument("--num_layers", type=int, default=1, help="number of layers")
 parser.add_argument("--learning_rate", type=float, default=1e-3, help="learning rate")
 parser.add_argument("--dropout", type=float, default=0.7, help="dropout")
+parser.add_argument("--lambda", type=float, default=1.0, help="coefficient for beta")
+
 parser.add_argument("--beta_batch", type=int, default=0, help="batch norm for beta ")
 parser.add_argument("--phi_batch", type=int, default=0, help="batch norm for phi ")
+parser.add_argument("--theta_batch", type=int, default=0, help="batch norm for theta ")
 parser.add_argument("--init_from", type=str, default=None, help="init_from")
 parser.add_argument("--save_dir", type=str, default="results", help="dir for saving the model")
 
@@ -81,7 +84,7 @@ def load_dataset(params,frequency_limit):
 
 
 
-def iterator(data, stop_words_ids, params,vocab_wo_stop):
+def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout):
   def batchify():
     x = data
     batch_size = params.batch_size
@@ -125,6 +128,7 @@ def iterator(data, stop_words_ids, params,vocab_wo_stop):
           "indicators": np.asarray(indicators, dtype='int32'),
           "length": np.asarray(length, dtype='int32'),
           "frequency": feature,
+          "dropout":dropout
           }
       """
       for v in output.values():
@@ -139,9 +143,9 @@ def main():
   data_train, data_valid, data_test, vocab, stop_words_ids,vocab_wo_stop = load_dataset(params,frequency_limit=params.frequency_limit)
 
   train_num_batches=len(data_train) // params.batch_size
-  data_train = iterator(data_train, stop_words_ids, params,vocab_wo_stop)
-  data_valid = iterator(data_valid, stop_words_ids, params,vocab_wo_stop)
-  data_test = iterator(data_test, stop_words_ids, params,vocab_wo_stop)
+  data_train = iterator(data_train, stop_words_ids, params,vocab_wo_stop,params.dropout)
+  data_valid = iterator(data_valid, stop_words_ids, params,vocab_wo_stop,1.)
+  data_test = iterator(data_test, stop_words_ids, params,vocab_wo_stop,1.)
   params.stop_words = np.asarray([1 if i in stop_words_ids else 0 for i in range(params.vocab_size)])
   
   configproto = tf.ConfigProto()

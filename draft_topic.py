@@ -7,7 +7,8 @@ import sys
 import collections
 import tensorflow as tf
 
-a=tf.get_variable(name="sample_variable",shape=[2,3],dtype=tf.float32,initializer=tf.contrib.layers.xavier_initializer(uniform=True))
+dir_path = os.path.dirname(os.path.realpath(__file__))
+print(dir_path)
 # a=tf.random.normal(shape=[2,5],dtype=tf.float32)
 # a=tf.nn.softmax(a,-1)
 # w=tf.constant([0.,1.],dtype=tf.float32)
@@ -27,12 +28,6 @@ a=tf.get_variable(name="sample_variable",shape=[2,3],dtype=tf.float32,initialize
 # b=tf.constant([0,2])
 # c=tf.one_hot(b,3)
 # d=tf.reduce_sum(c*a,-1)
-
-with tf.Session() as sess:
-	sess.run(tf.global_variables_initializer())
-	a_print=sess.run(a)
-	print('a_print',a_print)
-	# print('y_print',y_print)
 
 
   # print('d_shape',sess.run(d).shape)  

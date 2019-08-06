@@ -8,11 +8,11 @@ import vsTopicModel
 import tensorflow as tf
 import collections
 
-
 EOS = "<EOS>"
 UNK = "<UNK>"
 EOS_ID = 0
 UNK_ID = 1
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--dataset", type=str, default="vist", help="dataset")
@@ -22,7 +22,7 @@ parser.add_argument("--frequency_limit", type=int, default=5, help="limit of rep
 parser.add_argument("--max_seqlen", type=int, default=100, help="maximum sequence length")
 parser.add_argument("--num_units", type=int, default=200, help="num of units")
 parser.add_argument("--num_hidden", type=int, default=500, help="hidden units of inference network")
-parser.add_argument("--dim_emb", type=int, default=200, help="dimension of embedding")
+parser.add_argument("--dim_emb", type=int, default=300, help="dimension of embedding")
 parser.add_argument("--num_topics", type=int, default=5, help="number of topics")
 parser.add_argument("--num_layers", type=int, default=1, help="number of layers")
 parser.add_argument("--learning_rate", type=float, default=1e-3, help="learning rate")
@@ -32,6 +32,7 @@ parser.add_argument("--lambda", type=float, default=1.0, help="coefficient for b
 parser.add_argument("--beta_batch", type=int, default=0, help="batch norm for beta ")
 parser.add_argument("--phi_batch", type=int, default=0, help="batch norm for phi ")
 parser.add_argument("--theta_batch", type=int, default=0, help="batch norm for theta ")
+
 parser.add_argument("--init_from", type=str, default=None, help="init_from")
 parser.add_argument("--save_dir", type=str, default="results", help="dir for saving the model")
 
@@ -84,7 +85,7 @@ def load_dataset(params,frequency_limit):
 
 
 
-def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout):
+def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout,model="train"):
   def batchify():
     x = data
     batch_size = params.batch_size
@@ -128,7 +129,8 @@ def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout):
           "indicators": np.asarray(indicators, dtype='int32'),
           "length": np.asarray(length, dtype='int32'),
           "frequency": feature,
-          "dropout":dropout
+          "dropout":dropout,
+          "model":model
           }
       """
       for v in output.values():
@@ -143,11 +145,20 @@ def main():
   data_train, data_valid, data_test, vocab, stop_words_ids,vocab_wo_stop = load_dataset(params,frequency_limit=params.frequency_limit)
 
   train_num_batches=len(data_train) // params.batch_size
-  data_train = iterator(data_train, stop_words_ids, params,vocab_wo_stop,params.dropout)
-  data_valid = iterator(data_valid, stop_words_ids, params,vocab_wo_stop,1.)
-  data_test = iterator(data_test, stop_words_ids, params,vocab_wo_stop,1.)
+  data_train = iterator(data_train, stop_words_ids, params,vocab_wo_stop,params.dropout,model="Train")
+  data_valid = iterator(data_valid, stop_words_ids, params,vocab_wo_stop,1.,model="Valid")
+  data_test = iterator(data_test, stop_words_ids, params,vocab_wo_stop,1.,model="Test")
   params.stop_words = np.asarray([1 if i in stop_words_ids else 0 for i in range(params.vocab_size)])
-  
+
+  params_str=str(vars(params))
+  save_file_name='k_'+str(params.num_topics)+'_flim_'+str(params.frequency_limit)+'_mxseq_'+\
+    str(params.max_seqlen)+'_nunt_'+str(params.num_units)+'_bb_'+str(params.beta_batch)+'_ph_'+str(params.phi_batch)+\
+    '_tb_'+str(params.theta_batch)
+    
+  save_info=[params_str,save_file_name]
+  # print(save_file_name)
+
+  # print(str(vars(params)))
   configproto = tf.ConfigProto()
   configproto.gpu_options.allow_growth = True
   configproto.allow_soft_placement = True
@@ -161,7 +172,7 @@ def main():
     else:
       tf.global_variables_initializer().run()
 
-    train.run(sess, (data_train, data_valid, data_test),train_num_batches,vocab)
+    train.run(sess, (data_train, data_valid, data_test),train_num_batches,vocab,save_info)
 
 if __name__ == "__main__":
   main()

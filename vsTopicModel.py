@@ -31,7 +31,7 @@ class vsTopic(object):
     self.stop_words = stop_words # vocab size of 01, 1 = stop_words
 
     with tf.name_scope("beta"):    
-      self.beta = 10*tf.get_variable(name="beta", shape=[self.num_topics,self.vocab_size])
+      self.beta = tf.get_variable(name="beta", shape=[self.num_topics,self.vocab_size])
 
     with tf.name_scope("embedding"):    
       self.embedding = tf.get_variable("embedding", shape=[self.vocab_size, self.dim_emb], dtype=tf.float32)
@@ -43,10 +43,15 @@ class vsTopic(object):
     seq_mask=tf.to_float(tf.sequence_mask(inputs["length"]))
     infer_logits = tf.layers.dense(inputs["frequency"], units=self.num_hidden, activation=tf.nn.softplus)
     target_to_onehot=tf.expand_dims(tf.to_float(tf.one_hot(inputs["targets"],self.vocab_size)),2)
+    print(inputs.keys())
 
     with tf.name_scope("theta"):
         '''KL kl_divergence for theta'''
-        alpha = tf.abs(tf.layers.dense(infer_logits, units=self.num_topics,activation=tf.nn.softplus))
+        if params["theta_batch"]==0:
+          alpha = tf.abs(tf.layers.dense(infer_logits, units=self.num_topics,activation=tf.nn.softplus))
+        elif params["theta_batch"]==1:
+          alpha = tf.abs(tf.contrib.layers.batch_norm(tf.layers.dense(infer_logits, units=self.num_topics,activation=tf.nn.softplus)))
+
         gamma = 10*tf.ones_like(alpha)
 
         pst_dist = tf.distributions.Dirichlet(alpha)
@@ -104,6 +109,7 @@ class vsTopic(object):
 
 
     total_loss=token_loss+theta_kl_loss+indicator_loss+phi_theta_kl_loss
+    print(inputs["model"])
 
 
     tf.summary.scalar(tensor=token_loss, name=mode+" token_loss")
@@ -118,6 +124,7 @@ class vsTopic(object):
         "token_ppl": token_ppl,
         "indicator_loss": indicator_loss,
         "theta_kl_loss": theta_kl_loss,
+        "phi_theta_kl_loss": phi_theta_kl_loss,
         "loss": total_loss,
         "theta": self.theta,
         "repre": final_output[-1][1],
@@ -138,7 +145,8 @@ class Train(object):
         "frequency": tf.placeholder(tf.float32, shape=[None, self.params["vocab_size"]], name="frequency"),
         # "frequency": tf.placeholder(tf.float32, shape=[None, None], name="frequency"),
         "targets": tf.placeholder(tf.int32, shape=[None, None], name="targets"),
-        "dropout":tf.placeholder(tf.float32,shape=None,name="dropout")
+        "dropout":tf.placeholder(tf.float32,shape=None,name="dropout"),
+        "model":" "
         }
 
   def build_graph(self):
@@ -178,7 +186,8 @@ class Train(object):
   def batch_train(self, sess, inputs):
     keys = list(self.outputs_train.keys())
     outputs = [self.outputs_train[key] for key in keys]
-    outputs = sess.run([self.train_op, self.global_step, self.summary] + outputs, feed_dict={self.inputs[k]: inputs[k] for k in self.inputs.keys()})
+    self.inputs["model"]=inputs["model"]
+    outputs = sess.run([self.train_op, self.global_step, self.summary] + outputs, feed_dict={self.inputs[k]: inputs[k] for k in self.inputs.keys() if k!="model"})
     ret = {keys[i]: outputs[i+3] for i in range(len(keys))}
     ret["global_step"] = outputs[1]
     ret["summary"] = outputs[2]
@@ -188,12 +197,16 @@ class Train(object):
   def batch_test(self, sess, inputs):
     keys = list(self.outputs_test.keys())
     outputs = [self.outputs_test[key] for key in keys]
-    outputs = sess.run(outputs, feed_dict={self.inputs[k]: inputs[k] for k in self.inputs.keys()})
+    outputs = sess.run(outputs, feed_dict={self.inputs[k]: inputs[k] for k in self.inputs.keys() if k!="model"})
     return {keys[i]: outputs[i] for i in range(len(keys))}
 
   def run_epoch(self, sess, datasets,train_num_batches,vocab):
-    valid_ppl_vec=[]
-    train_indic=[]
+    valid_ppl=[]
+    test_ppl=[]
+
+    train_token,train_indic, train_theta_kl,train_phi_theta=[],[],[],[]
+    valid_token,valid_indic, valid_theta_kl,valid_phi_theta=[],[],[],[]
+
     train_loss, valid_loss, test_loss = [], [], []
     train_theta, valid_theta, test_theta = [], [], []
     train_repre, valid_repre, test_repre = [], [], []
@@ -206,7 +219,10 @@ class Train(object):
       batch=next(dataset_train())
       train_outputs = self.batch_train(sess, batch)
       train_loss.append(train_outputs["loss"])
+      train_phi_theta.append(train_outputs["phi_theta_kl_loss"])
+      train_theta_kl.append(train_outputs["theta_kl_loss"])      
       train_indic.append(train_outputs["indicator_loss"])
+      train_token.append(train_outputs["token_loss"])
       train_theta.append(train_outputs["theta"])
       train_repre.append(train_outputs["repre"])
       beta=train_outputs["beta"]
@@ -222,10 +238,16 @@ class Train(object):
     # print_top_words(beta, list(zip(*sorted(vocab.items(), key=lambda x: x[1])))[0],name_beta="")            
     for batch in dataset_dev():
       valid_outputs = self.batch_test(sess, batch)
-      valid_loss.append(valid_outputs["loss"])
+      valid_loss.append(valid_outputs["loss"])      
+      valid_theta_kl.append(valid_outputs["theta_kl_loss"])
+      valid_phi_theta.append(valid_outputs["phi_theta_kl_loss"])      
+      valid_indic.append(valid_outputs["indicator_loss"])
+      valid_token.append(valid_outputs["token_loss"])
       valid_theta.append(valid_outputs["theta"])
       valid_repre.append(valid_outputs["repre"])
-      valid_ppl_vec.append(valid_outputs["token_ppl"])
+      valid_ppl.append(valid_outputs["token_ppl"])
+      # self.writer.add_summary(valid_outputs["summary"])
+
       # valid_label.append(batch["label"])
       #print(valid_outputs)
 
@@ -234,39 +256,84 @@ class Train(object):
       test_loss.append(test_outputs["loss"])
       test_theta.append(test_outputs["theta"])
       test_repre.append(test_outputs["repre"])
+      test_ppl.append(test_outputs["token_ppl"])
       # test_label.append(batch["label"])
       #print(test_outputs)
 
     train_loss = np.mean(train_loss)
+    train_token=np.mean(train_token)
+    train_indic=np.mean(train_indic)
+    train_theta_kl=np.mean(train_theta_kl)
+    train_phi_theta=np.mean(train_phi_theta)
+
     valid_loss = np.mean(valid_loss)
+    valid_token=np.mean(valid_token)    
+    valid_theta_kl=np.mean(valid_theta_kl)
+    valid_phi_theta=np.mean(valid_phi_theta)
+    valid_indic=np.mean(valid_indic)
+    valid_ppl=np.mean(valid_ppl)
+
     test_loss = np.mean(test_loss)
-    valid_ppl=np.mean(valid_ppl_vec)
 
     train_theta, valid_theta, test_theta = np.vstack(train_theta), np.vstack(valid_theta), np.vstack(test_theta)
     train_repre, valid_repre, test_repre = np.vstack(train_repre), np.vstack(valid_repre), np.vstack(test_repre)
     # train_label, valid_label, test_label = np.vstack(train_label), np.vstack(valid_label), np.vstack(test_label)
 
-    train_res = [train_loss, train_theta, train_repre]
-    valid_res = [valid_loss, valid_theta, valid_repre]
+    # train_res = [train_loss, train_theta, train_repre]
+    # valid_res = [valid_loss, valid_theta, valid_repre]
     test_res = [test_loss, test_theta, test_repre]
+    # train_res=[train_loss,train_token,train_indic,train_theta_kl,train_phi_theta]
+    # valid_res=[valid_loss,valid_token,valid_indic,valid_theta_kl,valid_phi_theta]    
+    train_res={"train_loss":train_loss,"train_token":train_token,"train_indic":train_indic,"train_theta_kl":train_theta_kl,"train_phi_theta":train_phi_theta}
+    valid_res={"valid_loss":valid_loss,"valid_token":valid_token,"valid_indic":valid_indic,"valid_theta_kl":valid_theta_kl,"valid_phi_theta":valid_phi_theta,"valid_ppl":valid_ppl}
 
-    print("train_loss: {:.4f}, valid_loss: {:.4f}, valid_ppl: {:.4f}, train_indicator: {:.45}".format(train_loss, valid_loss, valid_ppl,np.mean(train_indic)))
+    print('\n')
+    print("train_loss: {:.4f}, train_token: {:.4f}, train_indicator: {:.4f}, train_theta_kl: {:.4f}, train_phi_theta: {:.4f}".format(train_loss,train_token,train_indic,train_theta_kl,train_phi_theta))
+    print("valid_loss: {:.4f}, valid_token: {:.4f}, valid_indic: {:.4f}    , valid_theta_kl: {:.4f}, valid_phi_theta: {:.4f},  valid_ppl: {:.4f}".format(valid_loss,valid_token,valid_indic,valid_theta_kl,valid_phi_theta,valid_ppl))
+    print('\n')
 
     return train_res, valid_res, test_res,beta
 
-  def run(self, sess, datasets,train_num_batches,vocab):
+  def run(self, sess, datasets,train_num_batches,vocab,save_info):
     best_valid_loss = 1e10
     self.writer = tf.summary.FileWriter(os.path.join(self.params["save_dir"], "train"), sess.graph)
+    train_dict={"train_loss":[],"train_token":[],"train_indic":[],"train_theta_kl":[],"train_phi_theta":[]}
+    valid_dict={"valid_loss":[],"valid_token":[],"valid_indic":[],"valid_theta_kl":[],"valid_phi_theta":[]}
+    # valid_loss_all={"valid_loss":[],"valid_token":[],"valid_indic":[],"valid_theta_kl":[],"valid_phi_theta":[]}
+
     for i in range(self.params["num_epochs"]):
       train_res, valid_res, test_res,beta = self.run_epoch(sess, datasets,train_num_batches,vocab)
+      for key in train_dict:
+        train_dict[key]+=train_res[key]
+      for key in valid_dict:
+        valid_dict[key]+=valid_res[key]
+      # train_dict["train_loss"].append(train_res["train_loss"])
+      # train_dict["train_token"].append(train_res["train_loss"])
+      # train_dict["train_indic"].append(train_res["train_loss"])
+      # train_dict["train_theta_kl"].append(train_res["train_theta_kl"])
+      # trian_dict["train_phi_theta"].append(train_res["train_phi_theta"])
+
+      # valid_dict["valid_loss"].append(valid_res["valid_loss"])
+      # valid_dict["valid_token"].append(valid_res["valid_loss"])
+      # valid_dict["valid_indic"].append(valid_res["valid_loss"])
+      # valid_dict["valid_theta_kl"].append(valid_res["valid_theta_kl"])
+      # valid_dict["valid_phi_theta"].append(valid_res["valid_phi_theta"])
+      # valid_dict["valid_ppl"].append(valid_res["valid_ppl"])
+
+
+
+
+
+
+
       if i%4==0:
         print_top_words(beta, list(zip(*sorted(vocab.items(), key=lambda x: x[1])))[0],name_beta="")            
-      if best_valid_loss > valid_res[0]:
-        # print("Best model found at epoch {}".format(i))
-        best_valid_loss = valid_res[0]
-        with open(os.path.join(self.params["save_dir"], "results.pkl"), "wb") as f:
-          pkl.dump([train_res, valid_res, test_res], f)
-        self.saver.save(sess, os.path.join(self.params["save_dir"], "model"), global_step = i)
+      # if best_valid_loss > valid_res[0]:
+      #   # print("Best model found at epoch {}".format(i))
+      #   best_valid_loss = valid_res[0]
+    with open(os.path.join(self.params["save_dir"], save_info[1]+".pkl"), "wb") as f:
+      pkl.dump([train_dict, valid_dict, test_res], f)
+      # self.saver.save(sess, os.path.join(self.params["save_dir"], "model"), global_step = i)
 
 
 

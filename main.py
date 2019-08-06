@@ -148,13 +148,14 @@ def main():
   data_train = iterator(data_train, stop_words_ids, params,vocab_wo_stop,params.dropout,model="Train")
   data_valid = iterator(data_valid, stop_words_ids, params,vocab_wo_stop,1.,model="Valid")
   data_test = iterator(data_test, stop_words_ids, params,vocab_wo_stop,1.,model="Test")
+  params_str=str(vars(params))
+
   params.stop_words = np.asarray([1 if i in stop_words_ids else 0 for i in range(params.vocab_size)])
 
-  params_str=str(vars(params))
   save_file_name='k_'+str(params.num_topics)+'_flim_'+str(params.frequency_limit)+'_mxseq_'+\
     str(params.max_seqlen)+'_nunt_'+str(params.num_units)+'_bb_'+str(params.beta_batch)+'_ph_'+str(params.phi_batch)+\
     '_tb_'+str(params.theta_batch)
-    
+
   save_info=[params_str,save_file_name]
   # print(save_file_name)
 

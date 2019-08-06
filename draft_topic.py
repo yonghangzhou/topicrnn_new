@@ -8,7 +8,7 @@ import collections
 import tensorflow as tf
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
-print(dir_path)
+print(type(dir_path))
 # a=tf.random.normal(shape=[2,5],dtype=tf.float32)
 # a=tf.nn.softmax(a,-1)
 # w=tf.constant([0.,1.],dtype=tf.float32)

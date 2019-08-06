@@ -9,15 +9,15 @@ from tensorflow.python.keras.layers import LSTMCell,Dropout,StackedRNNCells,RNN
 
 
 def print_top_words(beta, feature_names, n_top_words=10,name_beta=" "):
-   # name_beta="beta_"+"iter_"+str(iter_count)+'_k_'+str(network_architecture['n_z'])+ \
-   #     '_z_'+str(network_architecture['z_batch_flag'])+'_q_'+str(network_architecture['beta_batch_flag'])+'_c_'+str(network_architecture['phi_batch_flag'])
-    beta_list=[]
-    print ('---------------Printing the Topics------------------')
-    for i in range(len(beta)):
-        beta_list.append(" ".join([feature_names[j] for j in beta[i].argsort()[:-n_top_words - 1:-1]]))
-        print(" ".join([feature_names[j]
-            for j in beta[i].argsort()[:-n_top_words - 1:-1]]))
-    print ('---------------End of Topics------------------')    
+  beta_list=[]
+  beta_values=[]
+  print ('---------------Printing the Topics------------------')
+  for i in range(len(beta)):  
+    beta_values.append(" ".join([" ".join([feature_names[j],':',str(beta[i][j]),', ']) for j in beta[i].argsort()[:-n_top_words - 1:-1]]))    
+    beta_list.append(" ".join([feature_names[j] for j in beta[i].argsort()[:-n_top_words - 1:-1]]))
+    print(" ".join([feature_names[j] for j in beta[i].argsort()[:-n_top_words - 1:-1]]))
+  print ('---------------End of Topics------------------')    
+  return(beta_list,beta_values)
 
 
 class vsTopic(object):
@@ -304,35 +304,17 @@ class Train(object):
     for i in range(self.params["num_epochs"]):
       train_res, valid_res, test_res,beta = self.run_epoch(sess, datasets,train_num_batches,vocab)
       for key in train_dict:
-        train_dict[key]+=train_res[key]
+        train_dict[key].append(train_res[key])
       for key in valid_dict:
-        valid_dict[key]+=valid_res[key]
-      # train_dict["train_loss"].append(train_res["train_loss"])
-      # train_dict["train_token"].append(train_res["train_loss"])
-      # train_dict["train_indic"].append(train_res["train_loss"])
-      # train_dict["train_theta_kl"].append(train_res["train_theta_kl"])
-      # trian_dict["train_phi_theta"].append(train_res["train_phi_theta"])
-
-      # valid_dict["valid_loss"].append(valid_res["valid_loss"])
-      # valid_dict["valid_token"].append(valid_res["valid_loss"])
-      # valid_dict["valid_indic"].append(valid_res["valid_loss"])
-      # valid_dict["valid_theta_kl"].append(valid_res["valid_theta_kl"])
-      # valid_dict["valid_phi_theta"].append(valid_res["valid_phi_theta"])
-      # valid_dict["valid_ppl"].append(valid_res["valid_ppl"])
-
-
-
-
-
-
-
+        valid_dict[key].append(valid_res[key])
       if i%4==0:
-        print_top_words(beta, list(zip(*sorted(vocab.items(), key=lambda x: x[1])))[0],name_beta="")            
-      # if best_valid_loss > valid_res[0]:
-      #   # print("Best model found at epoch {}".format(i))
-      #   best_valid_loss = valid_res[0]
-    with open(os.path.join(self.params["save_dir"], save_info[1]+".pkl"), "wb") as f:
-      pkl.dump([train_dict, valid_dict, test_res], f)
+        beta_list,beta_values=print_top_words(beta, list(zip(*sorted(vocab.items(), key=lambda x: x[1])))[0],name_beta="")            
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    with open(os.path.join(dir_path+"/"+self.params["save_dir"], save_info[1]+".pkl"), "wb") as f:
+      beta_dict={"beta_names":beta_list,"beta_values":beta_values}
+      pkl.dump([train_dict, valid_dict,beta_list,save_info[0],beta_dict], f)
+
+
       # self.saver.save(sess, os.path.join(self.params["save_dir"], "model"), global_step = i)
 
 

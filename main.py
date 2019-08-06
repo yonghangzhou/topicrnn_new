@@ -8,6 +8,9 @@ import vsTopicModel
 import tensorflow as tf
 import collections
 
+dir_path = os.path.dirname(os.path.realpath(__file__))
+
+
 EOS = "<EOS>"
 UNK = "<UNK>"
 EOS_ID = 0
@@ -32,6 +35,7 @@ parser.add_argument("--lambda", type=float, default=1.0, help="coefficient for b
 parser.add_argument("--beta_batch", type=int, default=0, help="batch norm for beta ")
 parser.add_argument("--phi_batch", type=int, default=0, help="batch norm for phi ")
 parser.add_argument("--theta_batch", type=int, default=0, help="batch norm for theta ")
+parser.add_argument("--lstm_norm",type=int,default=0,help="Using LayerNormBasicLSTMCell instead of LSTMCell")
 
 parser.add_argument("--init_from", type=str, default=None, help="init_from")
 parser.add_argument("--save_dir", type=str, default="results", help="dir for saving the model")
@@ -42,7 +46,7 @@ def load_dataset(params,frequency_limit):
     	stop_words = [line.strip() for line in f.readlines() if line.strip()]
     	stop_words.append(UNK)
     	stop_words.append(EOS)
-    with open("datasets/VIST_max_dataset/train_data_dii_sis.txt", "r") as f:
+    with open(dir_path+"/datasets/VIST_max_dataset/train_data_dii_sis.txt", "r") as f:
         words = f.read().replace("\n", "").split()         
 
     word_counter = collections.Counter(words).most_common()
@@ -73,9 +77,9 @@ def load_dataset(params,frequency_limit):
 
     		return data
     # vocab = {k: vocab[k] for k in vocab if vocab[k] < params.vocab_size}
-    train_x = get_data("datasets/VIST_max_dataset/train_data_dii_sis.txt",vocab,params.vocab_size)
-    valid_x = get_data("datasets/VIST_max_dataset/val_data_dii_sis.txt",vocab,params.vocab_size)
-    test_x = get_data("datasets/VIST_max_dataset/test_data_dii_sis.txt",vocab,params.vocab_size)
+    train_x = get_data(dir_path+"/datasets/VIST_max_dataset/train_data_dii_sis.txt",vocab,params.vocab_size)
+    valid_x = get_data(dir_path+"/datasets/VIST_max_dataset/val_data_dii_sis.txt",vocab,params.vocab_size)
+    test_x = get_data(dir_path+"/datasets/VIST_max_dataset/test_data_dii_sis.txt",vocab,params.vocab_size)
     stop_words_ids = set([vocab[k] for k in stop_words if k in vocab])
     # print (stop_words_ids)
     train = train_x

@@ -63,9 +63,15 @@ class vsTopic(object):
     
     with tf.name_scope("RNN_CELL"):
       emb = tf.nn.embedding_lookup(self.embedding, inputs["tokens"])
-      cells = [tf.nn.rnn_cell.DropoutWrapper(tf.nn.rnn_cell.LSTMCell(self.num_units), output_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
+      if params["lstm_norm"]==0:
+        cells = [tf.nn.rnn_cell.DropoutWrapper(tf.nn.rnn_cell.LSTMCell(self.num_units), output_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
+        # cell = tf.nn.rnn_cell.MultiRNNCell(cells)
+        # rnn_outputs, final_output = tf.nn.dynamic_rnn(cell, inputs=emb, sequence_length=inputs["length"], dtype=tf.float32)
+      elif params["lstm_norm"]==1:
+        cells = [tf.contrib.rnn.LayerNormBasicLSTMCell(num_units=self.num_units, dropout_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
       cell = tf.nn.rnn_cell.MultiRNNCell(cells)
       rnn_outputs, final_output = tf.nn.dynamic_rnn(cell, inputs=emb, sequence_length=inputs["length"], dtype=tf.float32)
+
 
 
     with tf.name_scope("Phi"):      
@@ -298,7 +304,7 @@ class Train(object):
     best_valid_loss = 1e10
     self.writer = tf.summary.FileWriter(os.path.join(self.params["save_dir"], "train"), sess.graph)
     train_dict={"train_loss":[],"train_token":[],"train_indic":[],"train_theta_kl":[],"train_phi_theta":[]}
-    valid_dict={"valid_loss":[],"valid_token":[],"valid_indic":[],"valid_theta_kl":[],"valid_phi_theta":[]}
+    valid_dict={"valid_loss":[],"valid_token":[],"valid_indic":[],"valid_theta_kl":[],"valid_phi_theta":[],"valid_ppl":[]}
     # valid_loss_all={"valid_loss":[],"valid_token":[],"valid_indic":[],"valid_theta_kl":[],"valid_phi_theta":[]}
 
     for i in range(self.params["num_epochs"]):

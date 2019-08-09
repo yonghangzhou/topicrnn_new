@@ -36,6 +36,9 @@ parser.add_argument("--beta_batch", type=int, default=0, help="batch norm for be
 parser.add_argument("--phi_batch", type=int, default=0, help="batch norm for phi ")
 parser.add_argument("--theta_batch", type=int, default=0, help="batch norm for theta ")
 parser.add_argument("--lstm_norm",type=int,default=0,help="Using LayerNormBasicLSTMCell instead of LSTMCell")
+parser.add_argument("--beta_sftmx",type=int,default=0,help="Adding Softmax to Beta matrix; (phi_batch flag should be 0 in this case)")
+parser.add_argument("--rnn_lim", type=int, default=0, help="adding coefficient for rnn ")
+
 
 parser.add_argument("--init_from", type=str, default=None, help="init_from")
 parser.add_argument("--save_dir", type=str, default="results", help="dir for saving the model")

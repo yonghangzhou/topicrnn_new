@@ -32,6 +32,7 @@ class vsTopic(object):
 
     with tf.name_scope("beta"):    
       self.beta = tf.get_variable(name="beta", shape=[self.num_topics,self.vocab_size])
+      # self.beta=(1-stop_words)*self.beta
 
     with tf.name_scope("embedding"):    
       self.embedding = tf.get_variable("embedding", shape=[self.vocab_size, self.dim_emb], dtype=tf.float32)
@@ -39,6 +40,10 @@ class vsTopic(object):
 
   def forward(self, inputs,params, mode="Train"):
     # build inference network
+    if params["beta_sftmx"]==1:
+      self.beta=tf.nn.softmax(self.beta)
+      params["beta_batch"]=0
+
     stop_indicator=tf.to_float(tf.expand_dims(inputs["indicators"],-1))
     seq_mask=tf.to_float(tf.sequence_mask(inputs["length"]))
     infer_logits = tf.layers.dense(inputs["frequency"], units=self.num_hidden, activation=tf.nn.softplus)
@@ -87,7 +92,10 @@ class vsTopic(object):
     with tf.name_scope("token_loss"):     
 
       if params["beta_batch"]==1:
-        token_logits = tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2) + params["lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.contrib.layers.batch_norm(tf.expand_dims(self.beta,0))        
+        if params["rnn_lim"]==0:
+          token_logits = tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2) + params["lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.contrib.layers.batch_norm(tf.expand_dims(self.beta,0))        
+        elif params["rnn_lim"]==1:
+          token_logits = ((params["lambda"]+((1-params["lambda"])*(tf.expand_dims(stop_indicator,-1))))*tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2)) + tf.expand_dims(1-stop_indicator,-1)*tf.contrib.layers.batch_norm(tf.expand_dims(self.beta,0))                          
       elif params["beta_batch"]==0:
         token_logits = tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2) + params["lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(self.beta,0)
       token_logits=tf.nn.softmax(token_logits,-1) 

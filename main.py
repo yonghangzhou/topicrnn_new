@@ -38,6 +38,8 @@ parser.add_argument("--theta_batch", type=int, default=0, help="batch norm for t
 parser.add_argument("--lstm_norm",type=int,default=0,help="Using LayerNormBasicLSTMCell instead of LSTMCell")
 parser.add_argument("--beta_sftmx",type=int,default=0,help="Adding Softmax to Beta matrix; (phi_batch flag should be 0 in this case)")
 parser.add_argument("--rnn_lim", type=int, default=0, help="adding coefficient for rnn ")
+parser.add_argument("--mixture_lambda",type=float,default=0.5,help="mixture paramater for combining h and beta")
+
 
 
 parser.add_argument("--init_from", type=str, default=None, help="init_from")

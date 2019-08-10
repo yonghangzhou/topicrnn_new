@@ -8,7 +8,7 @@ from tensorflow import distributions as dist
 from tensorflow.python.keras.layers import LSTMCell,Dropout,StackedRNNCells,RNN
 
 
-def print_top_words(beta, feature_names, n_top_words=10,name_beta=" "):
+def print_top_words(beta, feature_names, n_top_words=20,name_beta=" "):
   beta_list=[]
   beta_values=[]
   print ('---------------Printing the Topics------------------')
@@ -36,7 +36,7 @@ class vsTopic(object):
 
     with tf.name_scope("embedding"):    
       self.embedding = tf.get_variable("embedding", shape=[self.vocab_size, self.dim_emb], dtype=tf.float32)
-    
+
 
   def forward(self, inputs,params, mode="Train"):
     # build inference network
@@ -69,7 +69,9 @@ class vsTopic(object):
     with tf.name_scope("RNN_CELL"):
       emb = tf.nn.embedding_lookup(self.embedding, inputs["tokens"])
       if params["lstm_norm"]==0:
-        cells = [tf.nn.rnn_cell.DropoutWrapper(tf.nn.rnn_cell.LSTMCell(self.num_units), output_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
+        # cells = [tf.nn.rnn_cell.DropoutWrapper(tf.nn.rnn_cell.LSTMCell(self.num_units), output_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
+        cells = [tf.nn.rnn_cell.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.num_units), output_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
+
         # cell = tf.nn.rnn_cell.MultiRNNCell(cells)
         # rnn_outputs, final_output = tf.nn.dynamic_rnn(cell, inputs=emb, sequence_length=inputs["length"], dtype=tf.float32)
       elif params["lstm_norm"]==1:
@@ -91,15 +93,20 @@ class vsTopic(object):
 
     with tf.name_scope("token_loss"):     
 
-      if params["beta_batch"]==1:
-        if params["rnn_lim"]==0:
-          token_logits = tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2) + params["lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.contrib.layers.batch_norm(tf.expand_dims(self.beta,0))        
-        elif params["rnn_lim"]==1:
-          token_logits = ((params["lambda"]+((1-params["lambda"])*(tf.expand_dims(stop_indicator,-1))))*tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2)) + tf.expand_dims(1-stop_indicator,-1)*tf.contrib.layers.batch_norm(tf.expand_dims(self.beta,0))                          
+      if params["beta_batch"]==1:        
+        token_logits = (1-(params["mixture_lambda"]*(1-tf.expand_dims(stop_indicator,-1))))*\
+                      tf.expand_dims(tf.nn.softmax(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),-1),2)+\
+                      params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(tf.nn.softmax(tf.contrib.layers.batch_norm(self.beta),-1),0)                                            
+                      # params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(tf.contrib.layers.batch_norm(tf.nn.softmax(self.beta,-1)),0)                      
+          # *(tf.expand_dims(stop_indicator,-1))))*tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2)) + tf.expand_dims(1-stop_indicator,-1)*tf.contrib.layers.batch_norm(tf.expand_dims(self.beta,0))                                  
+        # if params["rnn_lim"]==0:
+        #   token_logits = tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2) + params["lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.contrib.layers.batch_norm(tf.expand_dims(self.beta,0))        
+        # elif params["rnn_lim"]==1:
+        # token_logits = ((params["lambda"]+((1-params["lambda"])*(tf.expand_dims(stop_indicator,-1))))*tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2)) + tf.expand_dims(1-stop_indicator,-1)*tf.contrib.layers.batch_norm(tf.expand_dims(self.beta,0))                          
+        # token_logits=tf.nn.softmax(token_logits,-1) 
       elif params["beta_batch"]==0:
         token_logits = tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2) + params["lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(self.beta,0)
-      token_logits=tf.nn.softmax(token_logits,-1) 
-      token_loss=tf.log(tf.reduce_sum(target_to_onehot*token_logits,-1)+1e-6)
+      token_loss=tf.log(tf.reduce_sum(target_to_onehot*token_logits,-1)+1e-4)
       token_loss=seq_mask*tf.reduce_sum(self.phi*token_loss,-1)
       token_ppl = tf.exp(-tf.reduce_sum(token_loss) / (1e-3 + tf.to_float(tf.reduce_sum(inputs["length"]))))
       token_loss = -tf.reduce_mean(tf.reduce_sum(token_loss, axis=-1))

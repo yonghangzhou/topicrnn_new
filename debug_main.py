@@ -56,30 +56,40 @@ def load_dataset(params,frequency_limit):
         words = f.read().replace("\n", "").split()         
 
     word_counter = collections.Counter(words).most_common()
-    vocab = dict()
-    vocab_wo_stop = dict()    
+    # vocab = dict()
+    # vocab_wo_stop = dict()    
+    vocab_list=[]
     for word, frequency in word_counter:
         if frequency>frequency_limit:
-            vocab[word] = len(vocab)
             if word not in stop_words:
-                vocab_wo_stop[word]=len(vocab_wo_stop)	
+                vocab_list.insert(0,word)
+            else:
+                vocab_list.insert(-1,word)
 
 
-    vocab[EOS] = EOS_ID
-    vocab[UNK] = UNK_ID
+                # vocab_wo_stop[word]=len(vocab_wo_stop)	
+
+    vocab=dict(zip(vocab_list,list(np.arange(len(vocab_list)))))
+
+    vocab[EOS] = len(vocab)
+    vocab[UNK] = len(vocab)
+
     vocab_wo_stop=vocab
+    # vocab_wo_stop[EOS] = EOS_ID
+    # vocab_wo_stop[UNK] = UNK_ID
+
     params.vocab_size=len(vocab)
     params.vocab_wo_size=len(vocab_wo_stop)
     def get_data(filename, vocab,vocab_size):
-    	EOS = "<EOS>"
-    	UNK = "<UNK>"
-    	EOS_ID = 0
-    	UNK_ID = 1      
+    	# EOS = "<EOS>"
+    	# UNK = "<UNK>"
+    	# EOS_ID = 0
+    	# UNK_ID = 1      
     	with open(filename, "r") as f:
     		lines = f.readlines()
     		data = list(map(lambda s: s.strip().split(), lines))
     		# data=[[vocab.get(x,UNK_ID) if vocab[x] < vocab_size else UNK_ID for x in line if x in vocab.keys()] for line in data]      
-    		data=[[vocab.get(x,UNK_ID) for x in line if x in vocab.keys()] for line in data]      
+    		data=[[vocab.get(x,vocab[UNK]) for x in line if x in vocab.keys()] for line in data]      
 
     		return data
     # vocab = {k: vocab[k] for k in vocab if vocab[k] < params.vocab_size}
@@ -95,7 +105,8 @@ def load_dataset(params,frequency_limit):
 
 
 
-def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout,model="train"):
+def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout,vocab,model="train"):
+  reverse_vocab_in=dict(zip(vocab.values(),vocab.keys()))
   def batchify():
     x = data
     batch_size = params.batch_size
@@ -112,9 +123,12 @@ def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout,model="train"):
       width = max_seqlen
 
       # indicators = [[1 if token in stop_words_ids else 0 for token in sample] for sample in samples]
+      eos_word=[vocab[EOS]]
+      # tokens = [[0] + sample + [0] * (width - 1 - len(sample)) for sample in samples]
+      # targets = [sample + [0] * (width - len(sample)) for sample in samples]
 
-      tokens = [[0] + sample + [0] * (width - 1 - len(sample)) for sample in samples]
-      targets = [sample + [0] * (width - len(sample)) for sample in samples]
+      tokens = [eos_word + sample + eos_word * (width - 1 - len(sample)) for sample in samples]
+      targets = [sample + eos_word * (width - len(sample)) for sample in samples]
 
       indicators = [[1 if token in stop_words_ids else 0 for token in sample] for sample in targets]      
       indicators = [indicator + [1] * (width - len(indicator)) for indicator in indicators]
@@ -126,6 +140,16 @@ def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout,model="train"):
           # if token not in stop_words_ids :
 
             feature[i, token] += 1.
+
+      # targets_wo = [[vocab_wo_stop.get(reverse_vocab_in.get(word,UNK_ID),UNK_ID) for word in sample] for sample in targets]
+
+      # for i in range(batch_size):
+      #   for token in samples[i]:
+      #     if vocab_wo_stop[token] in vocab_wo_stop.values():
+      #     # if token not in stop_words_ids :
+
+      #       feature[i, token] += 1.
+
 
 
       # feature = feature / (0.1 + np.sum(feature, axis=1, keepdims=True))
@@ -142,7 +166,8 @@ def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout,model="train"):
           "length": np.asarray(length, dtype='int32'),
           "frequency": feature,
           "dropout":dropout,
-          "model":model
+          "model":model,
+          # "targets_wo":np.asarray(targets_wo,dtype='int32')
           }
       """
       for v in output.values():
@@ -155,30 +180,41 @@ def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout,model="train"):
 def main():
   params = parser.parse_args()
   data_train, data_valid, data_test, vocab, stop_words_ids,vocab_wo_stop = load_dataset(params,frequency_limit=params.frequency_limit)
+  print('vocab_len',len(vocab))
+  print('vocab_wo_len',len(vocab_wo_stop))
+  reverse_vocab=dict(zip(vocab.values(),vocab.keys()))
+  print(min(stop_words_ids))
+  # for item in stop_words_ids:
+  #   print(item,reverse_vocab[item])
+
 
   train_num_batches=len(data_train) // params.batch_size
-  data_train = iterator(data_train, stop_words_ids, params,vocab_wo_stop,params.dropout,model="Train")
+  data_train = iterator(data_train, stop_words_ids, params,vocab_wo_stop,params.dropout,vocab,model="Train")
 
   # data_train_sample=next(data_train())
   # data_train_targ=data_train_sample["targets"][0]
   # data_train_indic=  data_train_sample["indicators"][0]
   # data_train_len=  data_train_sample["length"][0]
   # data_train_freq=  data_train_sample["frequency"][0]
+  # data_train_targ_wo=data_train_sample["targets_wo"][0]
+  # print('data_train_targ_wo',data_train_targ_wo)
 
 
 
-  reverse_vocab=dict(zip(vocab.values(),vocab.keys()))
+
+  # reverse_vocab=dict(zip(vocab.values(),vocab.keys()))
+  # reverse_vocab_wo=dict(zip(vocab_wo_stop.values(),vocab_wo_stop.keys()))
   # for item in range(len(data_train_targ)):
-  #   print(item,': ',reverse_vocab[data_train_targ[item]],', ',1-data_train_indic[item],', ',data_train_freq[item])
+  #   print(item,': ',reverse_vocab[data_train_targ[item]],', ',1-data_train_indic[item],data_train_targ[item]<min(stop_words_ids)-1)
 
   # print("-"*50,'\n',data_train_len)
 
-  data_valid = iterator(data_valid, stop_words_ids, params,vocab_wo_stop,1.,model="Valid")
-  data_test = iterator(data_test, stop_words_ids, params,vocab_wo_stop,1.,model="Test")
+  data_valid = iterator(data_valid, stop_words_ids, params,vocab_wo_stop,1.,vocab,model="Valid")
+  data_test = iterator(data_test, stop_words_ids, params,vocab_wo_stop,1.,vocab,model="Test")
   params_str=str(vars(params))
 
   params.stop_words = np.asarray([1 if i in stop_words_ids else 0 for i in range(params.vocab_size)])
-  # print(params.stop_words)
+  # print(np.where(params.stop_words==1)[0][0])
 
   save_file_name='k_'+str(params.num_topics)+'_dout_'+str(params.dropout)+'_mixture_lambda_'+str(params.mixture_lambda)+'_nunt_'+str(params.num_units)
 

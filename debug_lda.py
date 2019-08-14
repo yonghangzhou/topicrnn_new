@@ -21,7 +21,7 @@ def print_top_words(beta, feature_names, n_top_words=20,name_beta=" "):
 
 
 class vsTopic(object):
-  def __init__(self, num_units, dim_emb, vocab_size, num_topics, num_hidden, num_layers, stop_words):
+  def __init__(self, num_units, dim_emb, vocab_size, num_topics, num_hidden, num_layers, stop_words,max_seqlen):
     self.num_units = num_units
     self.dim_emb = dim_emb
     self.num_topics = num_topics
@@ -29,10 +29,15 @@ class vsTopic(object):
     self.num_layers = num_layers
     self.vocab_size = vocab_size
     self.stop_words = stop_words # vocab size of 01, 1 = stop_words
+    self.max_seqlen=max_seqlen
+    self.non_stop_len=int(np.where(stop_words==1)[0][0])
+    print('self.non_stop_len',self.non_stop_len)
+    self.theta_weight=tf.get_variable(shape=[self.dim_emb,self.max_seqlen,self.num_topics],name="theta_weight")
+    self.paddings=tf.constant([[0,0],[0,self.vocab_size-self.non_stop_len]])
 
     with tf.name_scope("beta"):    
       # self.beta = tf.get_variable(name="beta", shape=[self.num_topics,self.vocab_size],)
-      self.beta = tf.get_variable(name="beta",shape=([self.num_topics,self.vocab_size]))
+      self.beta = tf.get_variable(name="beta",shape=([self.num_topics,self.non_stop_len]))
       # self.stop_collector=tf.get_variable(name="stop_collector",shape=([1,self.vocab_size]))
 
       # self.beta=(1-stop_words)*self.beta
@@ -73,26 +78,36 @@ class vsTopic(object):
     
     with tf.name_scope("RNN_CELL"):
       emb = tf.nn.embedding_lookup(self.embedding, inputs["tokens"])
-      if params["lstm_norm"]==0:
-        # cells = [tf.nn.rnn_cell.DropoutWrapper(tf.nn.rnn_cell.LSTMCell(self.num_units), output_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
-        # cells = [tf.nn.rnn_cell.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.num_units), output_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
-        cells = [tf.nn.rnn_cell.GRUCell(self.num_units) for _ in range(self.num_layers)]
+      final_output=[[0,1]]
+      # if params["lstm_norm"]==0:
+      #   # cells = [tf.nn.rnn_cell.DropoutWrapper(tf.nn.rnn_cell.LSTMCell(self.num_units), output_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
+      #   # cells = [tf.nn.rnn_cell.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.num_units), output_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
+      #   cells = [tf.nn.rnn_cell.GRUCell(self.num_units) for _ in range(self.num_layers)]
 
 
         # cell = tf.nn.rnn_cell.MultiRNNCell(cells)
         # rnn_outputs, final_output = tf.nn.dynamic_rnn(cell, inputs=emb, sequence_length=inputs["length"], dtype=tf.float32)
-      elif params["lstm_norm"]==1:
-        cells = [tf.contrib.rnn.LayerNormBasicLSTMCell(num_units=self.num_units, dropout_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
-      cell = tf.nn.rnn_cell.MultiRNNCell(cells)
-      rnn_outputs, final_output = tf.nn.dynamic_rnn(cell, inputs=emb, sequence_length=inputs["length"], dtype=tf.float32)
+      # elif params["lstm_norm"]==1:
+      #   cells = [tf.contrib.rnn.LayerNormBasicLSTMCell(num_units=self.num_units, dropout_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
+      # cell = tf.nn.rnn_cell.MultiRNNCell(cells)
+      # rnn_outputs, final_output = tf.nn.dynamic_rnn(cell, inputs=emb, sequence_length=inputs["length"], dtype=tf.float32)
 
     with tf.name_scope("theta"):
         '''KL kl_divergence for theta'''
         # emb_wo=(1-stop_indicator)*tf.nn.embedding_lookup(self.embedding,inputs["targets"])          
-        emb_wo=tf.nn.embedding_lookup(self.embedding,inputs["targets"])          
+        emb_wo=(1-stop_indicator)*tf.nn.embedding_lookup(self.embedding,inputs["targets"])          
 
         if params["theta_batch"]==0:
-          alpha = tf.abs(tf.layers.dense(tf.squeeze(tf.layers.dense(emb_wo, units=1,activation=tf.nn.softplus),-1),units=self.num_topics,activation=tf.nn.softplus))
+          # alpha = tf.nn.dropout(tf.abs(tf.layers.dense(tf.squeeze(tf.layers.dense(emb_wo, units=1,activation=tf.nn.softplus),-1),units=self.num_topics,activation=tf.nn.softplus)+1e-10),inputs["dropout"])
+          # alpha = tf.abs(tf.layers.dense(tf.squeeze(tf.layers.dense(emb_wo, units=1,activation=tf.nn.softplus),-1),units=self.num_topics,activation=tf.nn.softplus))
+
+          # alpha = tf.layers.dense(tf.squeeze(tf.layers.dense(emb_wo, units=1,activation=tf.nn.softplus),-1),units=self.num_topics,activation=tf.nn.softplus)
+          # alpha = tf.layers.dense(tf.squeeze(tf.layers.dense(emb_wo, units=1,activation=tf.nn.softplus),-1),units=self.num_topics,activation=tf.nn.softplus)
+          alpha = tf.tensordot(emb_wo,self.theta_weight,[[1,2],[0,1]])
+
+
+
+
           print("alpha",alpha.get_shape())
           # alpha = tf.abs(tf.layers.dense(infer_logits, units=self.num_topics,activation=tf.nn.softplus))
 
@@ -101,7 +116,7 @@ class vsTopic(object):
 
           # alpha = tf.abs(tf.contrib.layers.batch_norm(tf.layers.dense(infer_logits, units=self.num_topics,activation=tf.nn.softplus)))
 
-        gamma = 10*tf.ones_like(alpha)
+        gamma = tf.ones_like(alpha)
 
         pst_dist = tf.distributions.Dirichlet(alpha)
         pri_dist = tf.distributions.Dirichlet(gamma)
@@ -115,7 +130,7 @@ class vsTopic(object):
       if params["phi_batch"]==0:
         self.phi=tf.nn.softmax(tf.layers.dense(emb_wo,self.num_topics),-1)
       elif params["phi_batch"]==1:
-        self.phi=tf.nn.softmax(tf.contrib.layers.batch_norm(tf.layers.dense(emb_wo,self.num_topics),-1))
+        self.phi=tf.nn.dropout(tf.nn.softmax(tf.contrib.layers.batch_norm(tf.layers.dense(emb_wo,self.num_topics),-1)),inputs["dropout"])
 
         
       self.phi=((1-stop_indicator)*self.phi)+((stop_indicator)*(1./self.num_topics))
@@ -123,13 +138,15 @@ class vsTopic(object):
     with tf.name_scope("token_loss"):     
 
       if params["beta_batch"]==1:        
-        # self.beta=(1-self.stop_words)*self.beta        
+        # self.beta=(1-*self.stop_words)*self.beta        
         # token_logits = (1-(params["mixture_lambda"]*(1-tf.expand_dims(stop_indicator,-1))))*\
         #               tf.expand_dims(tf.nn.softmax(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),-1),2)+\
         #               params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(tf.nn.softmax(tf.contrib.layers.batch_norm(self.beta),-1),0)                                            
         ''' Debug '''
+        # token_logits = (1-(params["mixture_lambda"]*(1-tf.expand_dims(stop_indicator,-1))))*1\
+        # +params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(tf.nn.softmax(tf.contrib.layers.batch_norm(self.beta),-1),0)                                            
         token_logits = (1-(params["mixture_lambda"]*(1-tf.expand_dims(stop_indicator,-1))))*1\
-        +params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(tf.nn.softmax(tf.contrib.layers.batch_norm(self.beta),-1),0)                                            
+        +params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(tf.pad(tf.nn.softmax(tf.contrib.layers.batch_norm(self.beta),-1),self.paddings,"CONSTANT"),0)                                            
 
         # token_logits = (1-(params["mixture_lambda"]*(1-tf.expand_dims(stop_indicator,-1))))*\
         #               tf.expand_dims(tf.nn.softmax(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),-1),2)+\
@@ -148,38 +165,43 @@ class vsTopic(object):
         # elif params["rnn_lim"]==1:
         # token_logits = ((params["lambda"]+((1-params["lambda"])*(tf.expand_dims(stop_indicator,-1))))*tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2)) + tf.expand_dims(1-stop_indicator,-1)*tf.contrib.layers.batch_norm(tf.expand_dims(self.beta,0))                          
         # token_logits=tf.nn.softmax(token_logits,-1) 
-      elif params["beta_batch"]==0:
-        token_logits = tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2) + params["lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(self.beta,0)
+      # elif params["beta_batch"]==0:
+      #   token_logits = tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2) + params["lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(self.beta,0)
       token_loss=tf.log(tf.reduce_sum(target_to_onehot*token_logits,-1)+1e-4)
       token_loss=seq_mask*tf.reduce_sum(self.phi*token_loss,-1)
       token_ppl = tf.exp(-tf.reduce_sum(token_loss) / (1e-3 + tf.to_float(tf.reduce_sum(inputs["length"]))))
       token_loss = -tf.reduce_mean(tf.reduce_sum(token_loss, axis=-1))
     
-    with tf.name_scope("indicator_loss"):         
-      indicator_logits=tf.nn.dropout(tf.layers.dense(rnn_outputs,2,activation=tf.nn.softplus),inputs["dropout"])
-      labels=1-tf.to_float(tf.one_hot(inputs["indicators"],2))
-      indicator_loss=tf.nn.softmax_cross_entropy_with_logits(
-              _sentinel=None,
-              labels=labels,
-              logits=indicator_logits,
-              dim=-1,
-              name="indicator_loss_softmax",
-          )      
-      indicator_loss=tf.reduce_mean(tf.reduce_sum(seq_mask*indicator_loss,-1))
+    # with tf.name_scope("indicator_loss"):         
+    #   indicator_logits=tf.nn.dropout(tf.layers.dense(rnn_outputs,2,activation=tf.nn.softplus),inputs["dropout"])
+    #   labels=1-tf.to_float(tf.one_hot(inputs["indicators"],2))
+    #   indicator_loss=tf.nn.softmax_cross_entropy_with_logits(
+    #           _sentinel=None,
+    #           labels=labels,
+    #           logits=indicator_logits,
+    #           dim=-1,
+    #           name="indicator_loss_softmax",
+    #       )      
+    #   indicator_loss=tf.reduce_mean(tf.reduce_sum(seq_mask*indicator_loss,-1))
 
     with tf.name_scope("Phi_theta_kl"):
       theta=tf.expand_dims(self.theta,1)
-      phi_theta_kl_loss=tf.reduce_mean(tf.reduce_sum(seq_mask*tf.reduce_sum((1-stop_indicator)*self.phi*tf.log((self.phi/(theta+1e-10))+1e-6),-1),-1))
+      # phi_theta_kl_loss=tf.reduce_mean(tf.reduce_sum(seq_mask*tf.reduce_sum((1-stop_indicator)*self.phi*tf.log((self.phi/(theta+1e-10))+1e-6),-1),-1))
+      # phi_theta_kl_loss=tf.reduce_mean(tf.reduce_sum(seq_mask*tf.reduce_sum((1-stop_indicator)*self.phi*tf.log(((1-stop_indicator)*self.phi/(theta+1e-10))+1e-6),-1),-1))
+      # phi_theta_kl_loss=tf.reduce_mean(tf.reduce_sum(seq_mask*tf.reduce_sum((1-stop_indicator)*self.phi*tf.log((((1-stop_indicator)*self.phi)/(theta+1e-10))+1e-10),-1),-1))
+      phi_theta_kl_loss=tf.reduce_mean(tf.reduce_sum(tf.squeeze(1-stop_indicator,-1)*tf.reduce_sum((1-stop_indicator)*self.phi*tf.log((((1-stop_indicator)*self.phi)/(theta+1e-10))+1e-10),-1),-1))
+
+
 
     # total_loss=token_loss+0.1*theta_kl_loss+0*indicator_loss+phi_theta_kl_loss
-    total_loss=token_loss+theta_kl_loss+indicator_loss+phi_theta_kl_loss
+    total_loss=token_loss+theta_kl_loss+phi_theta_kl_loss
 
     print(inputs["model"])
 
 
     tf.summary.scalar(tensor=token_loss, name=mode+" token_loss")
     tf.summary.scalar(tensor=phi_theta_kl_loss, name=mode+" phi_theta_kl_loss")    
-    tf.summary.scalar(tensor=indicator_loss, name=mode+" indicator_loss")
+    # tf.summary.scalar(tensor=indicator_loss, name=mode+" indicator_loss")
     tf.summary.scalar(tensor=theta_kl_loss, name=mode+" theta_kl_loss")
     tf.summary.scalar(tensor=total_loss, name=mode+" total_loss")
     tf.summary.scalar(tensor=token_ppl, name=mode+" token_ppl")
@@ -187,12 +209,12 @@ class vsTopic(object):
     outputs = {
         "token_loss": token_loss,
         "token_ppl": token_ppl,
-        "indicator_loss": indicator_loss,
+        "indicator_loss": tf.constant([0]),
         "theta_kl_loss": theta_kl_loss,
         "phi_theta_kl_loss": phi_theta_kl_loss,
         "loss": total_loss,
         "theta": self.theta,
-        "repre": final_output[-1][1],
+        # "repre": final_output[-1][1],
         "beta":self.beta,
         }
     return outputs
@@ -227,6 +249,7 @@ class Train(object):
         num_layers = self.params["num_layers"],
         num_hidden = self.params["num_hidden"],
         stop_words = self.params["stop_words"],
+        max_seqlen = self.params["max_seqlen"],
         )
 
     # train output
@@ -289,14 +312,14 @@ class Train(object):
       train_indic.append(train_outputs["indicator_loss"])
       train_token.append(train_outputs["token_loss"])
       train_theta.append(train_outputs["theta"])
-      train_repre.append(train_outputs["repre"])
+      # train_repre.append(train_outputs["repre"])
       beta=train_outputs["beta"]
       theta=train_outputs["theta"]      
       # print('theta_to_beta',theta_to_beta.shape)
       # print('theta',theta.shape)
 
 
-      pbar.set_description("token_loss: %f, theta_kl_loss: %f, indicator_loss: %f" %(train_outputs["token_loss"],train_outputs["theta_kl_loss"],train_outputs["indicator_loss"]))      
+      pbar.set_description("token_loss: %f, theta_kl_loss: %f, train_phi_theta: %f" %(train_outputs["token_loss"],train_outputs["theta_kl_loss"],train_outputs["phi_theta_kl_loss"]))      
       # train_label.append(batch["label"])
       self.writer.add_summary(train_outputs["summary"], train_outputs["global_step"])
       #print(train_outputs)
@@ -309,7 +332,7 @@ class Train(object):
       valid_indic.append(valid_outputs["indicator_loss"])
       valid_token.append(valid_outputs["token_loss"])
       valid_theta.append(valid_outputs["theta"])
-      valid_repre.append(valid_outputs["repre"])
+      # valid_repre.append(valid_outputs["repre"])
       valid_ppl.append(valid_outputs["token_ppl"])
       # self.writer.add_summary(valid_outputs["summary"])
 
@@ -320,7 +343,7 @@ class Train(object):
       test_outputs = self.batch_test(sess, batch)
       test_loss.append(test_outputs["loss"])
       test_theta.append(test_outputs["theta"])
-      test_repre.append(test_outputs["repre"])
+      # test_repre.append(test_outputs["repre"])
       test_ppl.append(test_outputs["token_ppl"])
       # test_label.append(batch["label"])
       #print(test_outputs)
@@ -340,8 +363,11 @@ class Train(object):
 
     test_loss = np.mean(test_loss)
 
-    train_theta, valid_theta, test_theta = np.vstack(train_theta), np.vstack(valid_theta), np.vstack(test_theta)
-    train_repre, valid_repre, test_repre = np.vstack(train_repre), np.vstack(valid_repre), np.vstack(test_repre)
+    train_theta, valid_theta, test_theta = [],[],[]
+    # np.vstack(train_theta), np.vstack(valid_theta), np.vstack(test_theta)
+    train_repre, valid_repre, test_repre = [],[],[]
+    # np.vstack(train_repre), np.vstack(valid_repre), np.vstack(test_repre)
+    # train_theta
     # train_label, valid_label, test_label = np.vstack(train_label), np.vstack(valid_label), np.vstack(test_label)
 
     # train_res = [train_loss, train_theta, train_repre]

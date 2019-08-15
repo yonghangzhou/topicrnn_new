@@ -133,13 +133,17 @@ def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout,vocab,model="tra
       indicators = [[1 if token in stop_words_ids else 0 for token in sample] for sample in targets]      
       indicators = [indicator + [1] * (width - len(indicator)) for indicator in indicators]
 
-      feature = np.zeros([batch_size,params.vocab_wo_size], dtype='float32')
-      for i in range(batch_size):
-        for token in samples[i]:
-          if token not in stop_words_ids and token in vocab_wo_stop.values() :
-          # if token not in stop_words_ids :
+      # feature=list(map(lambda x: target.count(x) for target in targets))
+      feature=[[target.count(x) for x in target ]for target in targets]
+      feature=np.asarray(feature,dtype='int32')*(1-np.asarray(indicators,dtype='int32'))
 
-            feature[i, token] += 1.
+      # feature = np.zeros([batch_size,params.vocab_wo_size], dtype='float32')
+      # for i in range(batch_size):
+      #   for token in samples[i]:
+      #     if token not in stop_words_ids and token in vocab_wo_stop.values() :
+      #     # if token not in stop_words_ids :
+
+      #       feature[i, token] += 1.
 
       # targets_wo = [[vocab_wo_stop.get(reverse_vocab_in.get(word,UNK_ID),UNK_ID) for word in sample] for sample in targets]
 
@@ -164,7 +168,7 @@ def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout,vocab,model="tra
           "targets": np.asarray(targets, dtype='int32'),
           "indicators": np.asarray(indicators, dtype='int32'),
           "length": np.asarray(length, dtype='int32'),
-          "frequency": feature,
+          "frequency": np.asarray(feature,dtype='int32'),
           "dropout":dropout,
           "model":model,
           # "targets_wo":np.asarray(targets_wo,dtype='int32')
@@ -196,6 +200,7 @@ def main():
   # data_train_indic=  data_train_sample["indicators"][0]
   # data_train_len=  data_train_sample["length"][0]
   # data_train_freq=  data_train_sample["frequency"][0]
+  # print(data_train_freq)
   # data_train_targ_wo=data_train_sample["targets_wo"][0]
   # print('data_train_targ_wo',data_train_targ_wo)
 
@@ -205,7 +210,7 @@ def main():
   # reverse_vocab=dict(zip(vocab.values(),vocab.keys()))
   # reverse_vocab_wo=dict(zip(vocab_wo_stop.values(),vocab_wo_stop.keys()))
   # for item in range(len(data_train_targ)):
-  #   print(item,': ',reverse_vocab[data_train_targ[item]],', ',1-data_train_indic[item],data_train_targ[item]<min(stop_words_ids)-1)
+  #   print(item,': ',reverse_vocab[data_train_targ[item]],', non-stop:',1-data_train_indic[item],', ',data_train_freq[item])
 
   # print("-"*50,'\n',data_train_len)
 

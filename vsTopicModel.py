@@ -21,7 +21,7 @@ def print_top_words(beta, feature_names, n_top_words=20,name_beta=" "):
 
 
 class vsTopic(object):
-  def __init__(self, num_units, dim_emb, vocab_size, num_topics, num_hidden, num_layers, stop_words):
+  def __init__(self, num_units, dim_emb, vocab_size, num_topics, num_hidden, num_layers, stop_words,max_seqlen):
     self.num_units = num_units
     self.dim_emb = dim_emb
     self.num_topics = num_topics
@@ -29,132 +29,68 @@ class vsTopic(object):
     self.num_layers = num_layers
     self.vocab_size = vocab_size
     self.stop_words = stop_words # vocab size of 01, 1 = stop_words
+    self.max_seqlen=max_seqlen
+    self.non_stop_len=int(np.where(stop_words==1)[0][0])
+    self.theta_weight=tf.get_variable(shape=[self.dim_emb,self.max_seqlen,self.num_topics],name="theta_weight")
+    self.paddings=tf.constant([[0,0],[0,self.vocab_size-self.non_stop_len]])
 
     with tf.name_scope("beta"):    
-      # self.beta = tf.get_variable(name="beta", shape=[self.num_topics,self.vocab_size],)
-      self.beta = tf.get_variable(name="beta",shape=([self.num_topics,self.vocab_size]))
-      # self.stop_collector=tf.get_variable(name="stop_collector",shape=([1,self.vocab_size]))
-
-      # self.beta=(1-stop_words)*self.beta
+      self.beta = tf.get_variable(name="beta",shape=([self.num_topics,self.non_stop_len]))
 
     with tf.name_scope("embedding"):    
       self.embedding = tf.get_variable("embedding", shape=[self.vocab_size, self.dim_emb], dtype=tf.float32)
 
 
   def forward(self, inputs,params, mode="Train"):
-    # build inference network
-    # if params["beta_sftmx"]==1:
-    #   self.beta=tf.nn.softmax(self.beta)
-    #   params["beta_batch"]=0
 
     stop_indicator=tf.to_float(tf.expand_dims(inputs["indicators"],-1))
     seq_mask=tf.to_float(tf.sequence_mask(inputs["length"]))
-    # infer_logits = tf.layers.dense(inputs["frequency"], units=self.num_hidden, activation=tf.nn.softplus)
     target_to_onehot=tf.expand_dims(tf.to_float(tf.one_hot(inputs["targets"],self.vocab_size)),2)
-    print(inputs.keys())
 
-    # with tf.name_scope("theta"):
-    #     '''KL kl_divergence for theta'''
-    #     if params["theta_batch"]==0:
-    #       alpha = tf.abs(tf.layers.dense(infer_logits, units=1,activation=tf.nn.softplus))
-    #       # alpha = tf.abs(tf.layers.dense(infer_logits, units=self.num_topics,activation=tf.nn.softplus))
-
-    #     elif params["theta_batch"]==1:
-    #       alpha = tf.abs(tf.contrib.layers.batch_norm(tf.layers.dense(infer_logits, units=self.num_topics,activation=tf.nn.softplus)))
-
-    #     gamma = 10*tf.ones_like(alpha)
-
-    #     pst_dist = tf.distributions.Dirichlet(alpha)
-    #     pri_dist = tf.distributions.Dirichlet(gamma)
-
-    #     theta_kl_loss=pst_dist.kl_divergence(pri_dist)
-    #     theta_kl_loss=tf.reduce_mean(theta_kl_loss,-1)
-    #     self.theta=pst_dist.sample()        
-    
+    '''RNN Cell'''
     with tf.name_scope("RNN_CELL"):
-      emb = tf.nn.embedding_lookup(self.embedding, inputs["tokens"])
-      if params["lstm_norm"]==0:
-        # cells = [tf.nn.rnn_cell.DropoutWrapper(tf.nn.rnn_cell.LSTMCell(self.num_units), output_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
-        # cells = [tf.nn.rnn_cell.DropoutWrapper(tf.nn.rnn_cell.GRUCell(self.num_units), output_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
-        cells = [tf.nn.rnn_cell.GRUCell(self.num_units) for _ in range(self.num_layers)]
-
-
-        # cell = tf.nn.rnn_cell.MultiRNNCell(cells)
-        # rnn_outputs, final_output = tf.nn.dynamic_rnn(cell, inputs=emb, sequence_length=inputs["length"], dtype=tf.float32)
-      elif params["lstm_norm"]==1:
-        cells = [tf.contrib.rnn.LayerNormBasicLSTMCell(num_units=self.num_units, dropout_keep_prob=inputs["dropout"]) for _ in range(self.num_layers)]
+      emb = tf.nn.embedding_lookup(self.embedding, inputs["tokens"])    
+      cells = [tf.nn.rnn_cell.GRUCell(self.num_units) for _ in range(self.num_layers)]
       cell = tf.nn.rnn_cell.MultiRNNCell(cells)
       rnn_outputs, final_output = tf.nn.dynamic_rnn(cell, inputs=emb, sequence_length=inputs["length"], dtype=tf.float32)
 
+    ''' Sampling theta q(theta|w;alpha)'''
     with tf.name_scope("theta"):
-        '''KL kl_divergence for theta'''
-        # emb_wo=(1-stop_indicator)*tf.nn.embedding_lookup(self.embedding,inputs["targets"])          
-        emb_wo=tf.nn.embedding_lookup(self.embedding,inputs["targets"])          
+        emb_wo=tf.expand_dims(inputs["frequency"],-1)*tf.nn.embedding_lookup(self.embedding,inputs["targets"])          
+        alpha = tf.nn.softplus(tf.tensordot(emb_wo,self.theta_weight,[[1,2],[0,1]]))
 
-        if params["theta_batch"]==0:
-          alpha = tf.abs(tf.layers.dense(tf.squeeze(tf.layers.dense(emb_wo, units=1,activation=tf.nn.softplus),-1),units=self.num_topics,activation=tf.nn.softplus))
-          print("alpha",alpha.get_shape())
-          # alpha = tf.abs(tf.layers.dense(infer_logits, units=self.num_topics,activation=tf.nn.softplus))
 
-        elif params["theta_batch"]==1:
-          alpha = tf.abs(tf.contrib.layers.batch_norm(tf.layers.dense(tf.squeeze(tf.layers.dense(emb, units=1,activation=tf.nn.softplus),-1),units=self.num_topics,activation=tf.nn.softplus)))
-
-          # alpha = tf.abs(tf.contrib.layers.batch_norm(tf.layers.dense(infer_logits, units=self.num_topics,activation=tf.nn.softplus)))
-
-        gamma = 10*tf.ones_like(alpha)
+        gamma = tf.ones_like(alpha)
 
         pst_dist = tf.distributions.Dirichlet(alpha)
         pri_dist = tf.distributions.Dirichlet(gamma)
 
+        '''kl_divergence for theta'''
         theta_kl_loss=pst_dist.kl_divergence(pri_dist)
         theta_kl_loss=tf.reduce_mean(theta_kl_loss,-1)
         self.theta=pst_dist.sample()        
 
 
-    with tf.name_scope("Phi"):      
-      if params["phi_batch"]==0:
-        self.phi=tf.nn.softmax(tf.layers.dense(emb_wo,self.num_topics),-1)
-      elif params["phi_batch"]==1:
-        self.phi=tf.nn.softmax(tf.contrib.layers.batch_norm(tf.layers.dense(emb_wo,self.num_topics),-1))
-
-        
+    ''' Phi Matrix '''   
+    with tf.name_scope("Phi"):   
+      self.phi=tf.nn.dropout(tf.nn.softmax(tf.contrib.layers.batch_norm(tf.layers.dense(emb_wo,self.num_topics),-1)),inputs["dropout"])
       self.phi=((1-stop_indicator)*self.phi)+((stop_indicator)*(1./self.num_topics))
 
+        
+    '''Token loss (Reconstruction Loss)'''
     with tf.name_scope("token_loss"):     
+      token_logits = (1-(params["mixture_lambda"]*(1-tf.expand_dims(stop_indicator,-1))))*\
+      tf.expand_dims(tf.nn.softmax(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),-1),2)+\
+      params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(tf.pad(tf.nn.softmax(tf.contrib.layers.batch_norm(self.beta),-1),self.paddings,"CONSTANT"),0)                                            
 
-      if params["beta_batch"]==1:        
-        # self.beta=(1-self.stop_words)*self.beta        
-        # token_logits = (1-(params["mixture_lambda"]*(1-tf.expand_dims(stop_indicator,-1))))*\
-        #               tf.expand_dims(tf.nn.softmax(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),-1),2)+\
-        #               params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(tf.nn.softmax(tf.contrib.layers.batch_norm(self.beta),-1),0)                                            
-        ''' Debug '''
-        token_logits = (1-(params["mixture_lambda"]*(1-tf.expand_dims(stop_indicator,-1))))*1\
-        +params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(tf.nn.softmax(tf.contrib.layers.batch_norm(self.beta),-1),0)                                            
-
-        # token_logits = (1-(params["mixture_lambda"]*(1-tf.expand_dims(stop_indicator,-1))))*\
-        #               tf.expand_dims(tf.nn.softmax(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),-1),2)+\
-        #               params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(tf.nn.softmax(tf.contrib.layers.batch_norm(self.beta),-1),0)                                            
-
-
-                      # params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(tf.contrib.layers.batch_norm(tf.nn.softmax(self.beta,-1)),0)                      
-          # *(tf.expand_dims(stop_indicator,-1))))*tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2)) + tf.expand_dims(1-stop_indicator,-1)*tf.contrib.layers.batch_norm(tf.expand_dims(self.beta,0))                                  
-        # if params["rnn_lim"]==0:
-        # self.stop_collector=self.stop_words*self.stop_collector
-        # self.beta=(1-self.stop_words)*self.beta
-
-        # token_logits = tf.expand_dims(stop_indicator,-1)*self.stop_collector+tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2) + tf.expand_dims(1-stop_indicator,-1)*tf.contrib.layers.batch_norm(tf.expand_dims(self.beta,0))        
-        # token_logits = tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2) + (1-self.stop_words)*tf.contrib.layers.batch_norm(tf.expand_dims(self.beta,0))        
-
-        # elif params["rnn_lim"]==1:
-        # token_logits = ((params["lambda"]+((1-params["lambda"])*(tf.expand_dims(stop_indicator,-1))))*tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2)) + tf.expand_dims(1-stop_indicator,-1)*tf.contrib.layers.batch_norm(tf.expand_dims(self.beta,0))                          
-        # token_logits=tf.nn.softmax(token_logits,-1) 
-      elif params["beta_batch"]==0:
-        token_logits = tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2) + params["lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(self.beta,0)
+      # elif params["beta_batch"]==0:
+      #   token_logits = tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2) + params["lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(self.beta,0)
       token_loss=tf.log(tf.reduce_sum(target_to_onehot*token_logits,-1)+1e-4)
       token_loss=seq_mask*tf.reduce_sum(self.phi*token_loss,-1)
       token_ppl = tf.exp(-tf.reduce_sum(token_loss) / (1e-3 + tf.to_float(tf.reduce_sum(inputs["length"]))))
       token_loss = -tf.reduce_mean(tf.reduce_sum(token_loss, axis=-1))
     
+    ''' Indicator Loss (Softmax Cross Entropy)'''    
     with tf.name_scope("indicator_loss"):         
       indicator_logits=tf.nn.dropout(tf.layers.dense(rnn_outputs,2,activation=tf.nn.softplus),inputs["dropout"])
       labels=1-tf.to_float(tf.one_hot(inputs["indicators"],2))
@@ -166,15 +102,12 @@ class vsTopic(object):
               name="indicator_loss_softmax",
           )      
       indicator_loss=tf.reduce_mean(tf.reduce_sum(seq_mask*indicator_loss,-1))
-
+    ''' KL between Phi and theta '''
     with tf.name_scope("Phi_theta_kl"):
       theta=tf.expand_dims(self.theta,1)
-      phi_theta_kl_loss=tf.reduce_mean(tf.reduce_sum(seq_mask*tf.reduce_sum((1-stop_indicator)*self.phi*tf.log((self.phi/(theta+1e-10))+1e-6),-1),-1))
+      phi_theta_kl_loss=tf.reduce_mean(tf.reduce_sum(tf.squeeze(1-stop_indicator,-1)*tf.reduce_sum((1-stop_indicator)*self.phi*tf.log((((1-stop_indicator)*self.phi)/(theta+1e-10))+1e-10),-1),-1))
 
-    # total_loss=token_loss+0.1*theta_kl_loss+0*indicator_loss+phi_theta_kl_loss
     total_loss=token_loss+theta_kl_loss+indicator_loss+phi_theta_kl_loss
-
-    print(inputs["model"])
 
 
     tf.summary.scalar(tensor=token_loss, name=mode+" token_loss")
@@ -207,11 +140,10 @@ class Train(object):
         "tokens": tf.placeholder(tf.int32, shape=[None, self.params["max_seqlen"]], name="tokens"),
         "indicators": tf.placeholder(tf.int32, shape=[None, self.params["max_seqlen"]], name="indicators"),
         "length": tf.placeholder(tf.int32, shape=[None], name="length"),
-        "frequency": tf.placeholder(tf.float32, shape=[None, self.params["vocab_size"]], name="frequency"),
-        # "frequency": tf.placeholder(tf.float32, shape=[None, None], name="frequency"),
+        "frequency": tf.placeholder(tf.float32, shape=[None, self.params["max_seqlen"]], name="frequency"),
         "targets": tf.placeholder(tf.int32, shape=[None, self.params["max_seqlen"]], name="targets"),
         "dropout":tf.placeholder(tf.float32,shape=None,name="dropout"),
-        "model":" "
+        "model":" "    
         }
 
   def build_graph(self):
@@ -221,16 +153,16 @@ class Train(object):
 
     model = vsTopic(num_units = self.params["num_units"],
         dim_emb = self.params["dim_emb"],
-        # vocab_size = self.params["vocab_size"],
         vocab_size = self.params["vocab_size"],        
         num_topics = self.params["num_topics"],
         num_layers = self.params["num_layers"],
         num_hidden = self.params["num_hidden"],
         stop_words = self.params["stop_words"],
+        max_seqlen = self.params["max_seqlen"],
         )
 
     # train output
-    with tf.variable_scope('topicrnn'):
+    with tf.variable_scope('VSTM'):
       self.outputs_train = model.forward(self.inputs,self.params,mode="Train")
       self.outputs_test  = self.outputs_train #same here
       # self.outputs_test  = model.forward(self.inputs,self.params,1.,mode="Train")
@@ -296,7 +228,7 @@ class Train(object):
       # print('theta',theta.shape)
 
 
-      pbar.set_description("token_loss: %f, theta_kl_loss: %f, indicator_loss: %f" %(train_outputs["token_loss"],train_outputs["theta_kl_loss"],train_outputs["indicator_loss"]))      
+      pbar.set_description("token: %f, theta_kl: %f, indicator: %f, phi_theta: %f" %(train_outputs["token_loss"],train_outputs["theta_kl_loss"],train_outputs["indicator_loss"],train_outputs["phi_theta_kl_loss"]))      
       # train_label.append(batch["label"])
       self.writer.add_summary(train_outputs["summary"], train_outputs["global_step"])
       #print(train_outputs)
@@ -380,7 +312,6 @@ class Train(object):
       pkl.dump([train_dict, valid_dict,beta_list,save_info[0],beta_dict], f)
 
 
-      # self.saver.save(sess, os.path.join(self.params["save_dir"], "model"), global_step = i)
 
 
 

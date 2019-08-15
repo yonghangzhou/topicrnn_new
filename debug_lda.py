@@ -95,7 +95,7 @@ class vsTopic(object):
     with tf.name_scope("theta"):
         '''KL kl_divergence for theta'''
         # emb_wo=(1-stop_indicator)*tf.nn.embedding_lookup(self.embedding,inputs["targets"])          
-        emb_wo=(1-stop_indicator)*tf.nn.embedding_lookup(self.embedding,inputs["targets"])          
+        emb_wo=tf.expand_dims(inputs["frequency"],-1)*tf.nn.embedding_lookup(self.embedding,inputs["targets"])          
 
         if params["theta_batch"]==0:
           # alpha = tf.nn.dropout(tf.abs(tf.layers.dense(tf.squeeze(tf.layers.dense(emb_wo, units=1,activation=tf.nn.softplus),-1),units=self.num_topics,activation=tf.nn.softplus)+1e-10),inputs["dropout"])
@@ -103,7 +103,7 @@ class vsTopic(object):
 
           # alpha = tf.layers.dense(tf.squeeze(tf.layers.dense(emb_wo, units=1,activation=tf.nn.softplus),-1),units=self.num_topics,activation=tf.nn.softplus)
           # alpha = tf.layers.dense(tf.squeeze(tf.layers.dense(emb_wo, units=1,activation=tf.nn.softplus),-1),units=self.num_topics,activation=tf.nn.softplus)
-          alpha = tf.tensordot(emb_wo,self.theta_weight,[[1,2],[0,1]])
+          alpha = tf.nn.softplus(tf.tensordot(emb_wo,self.theta_weight,[[1,2],[0,1]]))
 
 
 
@@ -229,7 +229,7 @@ class Train(object):
         "tokens": tf.placeholder(tf.int32, shape=[None, self.params["max_seqlen"]], name="tokens"),
         "indicators": tf.placeholder(tf.int32, shape=[None, self.params["max_seqlen"]], name="indicators"),
         "length": tf.placeholder(tf.int32, shape=[None], name="length"),
-        "frequency": tf.placeholder(tf.float32, shape=[None, self.params["vocab_size"]], name="frequency"),
+        "frequency": tf.placeholder(tf.float32, shape=[None, self.params["max_seqlen"]], name="frequency"),
         # "frequency": tf.placeholder(tf.float32, shape=[None, None], name="frequency"),
         "targets": tf.placeholder(tf.int32, shape=[None, self.params["max_seqlen"]], name="targets"),
         "dropout":tf.placeholder(tf.float32,shape=None,name="dropout"),

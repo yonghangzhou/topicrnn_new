@@ -4,8 +4,8 @@ import pickle as pkl
 import numpy as np
 import sys
 # import model
-# import vsTopicModel
-import debug_lda
+import vsTopicModel
+# import debug_lda
 import tensorflow as tf
 import collections
 
@@ -56,53 +56,49 @@ def load_dataset(params,frequency_limit):
         words = f.read().replace("\n", "").split()         
 
     word_counter = collections.Counter(words).most_common()
-    vocab = dict()
-    vocab_wo_stop = dict()    
+    vocab_list=[]
     for word, frequency in word_counter:
         if frequency>frequency_limit:
-            vocab[word] = len(vocab)
             if word not in stop_words:
-                vocab_wo_stop[word]=len(vocab_wo_stop)	
+                vocab_list.insert(0,word)
+            else:
+                vocab_list.insert(-1,word)
 
+    vocab=dict(zip(vocab_list,list(np.arange(len(vocab_list)))))
 
-    vocab[EOS] = EOS_ID
-    vocab[UNK] = UNK_ID
+    vocab[EOS] = len(vocab)
+    vocab[UNK] = len(vocab)
+
     vocab_wo_stop=vocab
+    # vocab_wo_stop[EOS] = EOS_ID
+    # vocab_wo_stop[UNK] = UNK_ID
+
     params.vocab_size=len(vocab)
     params.vocab_wo_size=len(vocab_wo_stop)
     def get_data(filename, vocab,vocab_size):
-    	EOS = "<EOS>"
-    	UNK = "<UNK>"
-    	EOS_ID = 0
-    	UNK_ID = 1      
-    	with open(filename, "r") as f:
-    		lines = f.readlines()
-    		data = list(map(lambda s: s.strip().split(), lines))
-    		# data=[[vocab.get(x,UNK_ID) if vocab[x] < vocab_size else UNK_ID for x in line if x in vocab.keys()] for line in data]      
-    		data=[[vocab.get(x,UNK_ID) for x in line if x in vocab.keys()] for line in data]      
+      with open(filename, "r") as f:
+        lines = f.readlines()
+        data = list(map(lambda s: s.strip().split(), lines))
+        data=[[vocab.get(x,vocab[UNK]) for x in line if x in vocab.keys()] for line in data]      
 
-    		return data
-    # vocab = {k: vocab[k] for k in vocab if vocab[k] < params.vocab_size}
+        return data
     train_x = get_data(dir_path+"/datasets/VIST_max_dataset/train_data_dii_sis.txt",vocab,params.vocab_size)
     valid_x = get_data(dir_path+"/datasets/VIST_max_dataset/val_data_dii_sis.txt",vocab,params.vocab_size)
     test_x = get_data(dir_path+"/datasets/VIST_max_dataset/test_data_dii_sis.txt",vocab,params.vocab_size)
     stop_words_ids = set([vocab[k] for k in stop_words if k in vocab])
-    # print (stop_words_ids)
     train = train_x
     valid = valid_x
     test = test_x
     return train, valid, test, vocab, stop_words_ids,vocab_wo_stop
 
 
-
-def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout,model="train"):
+def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout,vocab,model="train"):
   def batchify():
     x = data
     batch_size = params.batch_size
     max_seqlen = params.max_seqlen
     shuffle_idx = np.random.permutation(len(x))
     num_batches_per_epoch=len(x) // batch_size    
-    # pbar=tqdm(range(num_batches_per_epoch))
 
     for i in range(num_batches_per_epoch):
       samples = [x[shuffle_idx[j]] for j in range(i*batch_size, i*batch_size + batch_size)]
@@ -111,38 +107,25 @@ def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout,model="train"):
       # width = max(length)
       width = max_seqlen
 
-      # indicators = [[1 if token in stop_words_ids else 0 for token in sample] for sample in samples]
+      eos_word=[vocab[EOS]]
 
-      tokens = [[0] + sample + [0] * (width - 1 - len(sample)) for sample in samples]
-      targets = [sample + [0] * (width - len(sample)) for sample in samples]
+      tokens = [eos_word + sample + eos_word * (width - 1 - len(sample)) for sample in samples]
+      targets = [sample + eos_word * (width - len(sample)) for sample in samples]
 
       indicators = [[1 if token in stop_words_ids else 0 for token in sample] for sample in targets]      
       indicators = [indicator + [1] * (width - len(indicator)) for indicator in indicators]
 
-      feature = np.zeros([batch_size,params.vocab_wo_size], dtype='float32')
-      for i in range(batch_size):
-        for token in samples[i]:
-          if token not in stop_words_ids and token in vocab_wo_stop.values() :
-          # if token not in stop_words_ids :
+      feature=[[target.count(x) for x in target ]for target in targets]
+      feature=np.asarray(feature,dtype='int32')*(1-np.asarray(indicators,dtype='int32'))
 
-            feature[i, token] += 1.
-
-
-      # feature = feature / (0.1 + np.sum(feature, axis=1, keepdims=True))
-      
-      """
-      for i in range(params.vocab_size):
-        if feature[0, i] != 0:
-          print(i, feature[0, i])
-      """
       
       output = {"tokens": np.asarray(tokens, dtype='int32'),
           "targets": np.asarray(targets, dtype='int32'),
           "indicators": np.asarray(indicators, dtype='int32'),
           "length": np.asarray(length, dtype='int32'),
-          "frequency": feature,
+          "frequency": np.asarray(feature,dtype='int32'),
           "dropout":dropout,
-          "model":model
+          "model":model,
           }
       """
       for v in output.values():
@@ -157,30 +140,17 @@ def main():
   data_train, data_valid, data_test, vocab, stop_words_ids,vocab_wo_stop = load_dataset(params,frequency_limit=params.frequency_limit)
 
   train_num_batches=len(data_train) // params.batch_size
-  data_train = iterator(data_train, stop_words_ids, params,vocab_wo_stop,params.dropout,model="Train")
-
-  # data_train_sample=next(data_train())
-  # data_train_targ=data_train_sample["targets"][0]
-  # data_train_indic=  data_train_sample["indicators"][0]
-  # data_train_len=  data_train_sample["length"][0]
-  # data_train_freq=  data_train_sample["frequency"][0]
-
+  data_train = iterator(data_train, stop_words_ids, params,vocab_wo_stop,params.dropout,vocab,model="Train")
 
 
   reverse_vocab=dict(zip(vocab.values(),vocab.keys()))
-  # for item in range(len(data_train_targ)):
-  #   print(item,': ',reverse_vocab[data_train_targ[item]],', ',1-data_train_indic[item],', ',data_train_freq[item])
-
-  # print("-"*50,'\n',data_train_len)
-
-  data_valid = iterator(data_valid, stop_words_ids, params,vocab_wo_stop,1.,model="Valid")
-  data_test = iterator(data_test, stop_words_ids, params,vocab_wo_stop,1.,model="Test")
+  data_valid = iterator(data_valid, stop_words_ids, params,vocab_wo_stop,1.,vocab,model="Valid")
+  data_test = iterator(data_test, stop_words_ids, params,vocab_wo_stop,1.,vocab,model="Test")
   params_str=str(vars(params))
 
   params.stop_words = np.asarray([1 if i in stop_words_ids else 0 for i in range(params.vocab_size)])
-  # print(params.stop_words)
-
   save_file_name='k_'+str(params.num_topics)+'_dout_'+str(params.dropout)+'_mixture_lambda_'+str(params.mixture_lambda)+'_nunt_'+str(params.num_units)
+
 
   save_info=[params_str,save_file_name]
 
@@ -188,7 +158,7 @@ def main():
   configproto.gpu_options.allow_growth = True
   configproto.allow_soft_placement = True
   with tf.Session(config=configproto) as sess:
-    train =  debug_lda.Train(vars(params))
+    train =  vsTopicModel.Train(vars(params))
     train.build_graph()
 
     if params.init_from:

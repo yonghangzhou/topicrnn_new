@@ -105,9 +105,13 @@ class vsTopic(object):
     ''' KL between Phi and theta '''
     with tf.name_scope("Phi_theta_kl"):
       theta=tf.expand_dims(self.theta,1)
-      phi_theta_kl_loss=tf.reduce_mean(tf.reduce_sum(tf.squeeze(1-stop_indicator,-1)*tf.reduce_sum((1-stop_indicator)*self.phi*tf.log((((1-stop_indicator)*self.phi)/(theta+1e-10))+1e-10),-1),-1))
+      phi_theta_kl_loss=tf.reduce_mean(tf.reduce_sum(tf.squeeze(1-stop_indicator,-1)*tf.reduce_sum((1-stop_indicator)*self.phi*tf.log((((1-stop_indicator)*self.phi)/(theta+1e-10))+1e-10),-1),-1))      
 
     total_loss=token_loss+theta_kl_loss+indicator_loss+phi_theta_kl_loss
+
+    with tf.name_scope("SwitchP"):
+      all_topics=tf.argmax(self.phi,-1)
+
 
 
     tf.summary.scalar(tensor=token_loss, name=mode+" token_loss")
@@ -127,6 +131,9 @@ class vsTopic(object):
         "theta": self.theta,
         "repre": final_output[-1][1],
         "beta":self.beta,
+        "all_topics": all_topics,
+        "non_stop_indic":1-inputs["indicators"],
+        "phi":self.phi
         }
     return outputs
 
@@ -198,10 +205,21 @@ class Train(object):
     return {keys[i]: outputs[i] for i in range(len(keys))}
 
   def run_epoch(self, sess, datasets,train_num_batches,vocab):
+
+
+    def switch_calc(topics_all,topics_non_idx):
+      non_topics=[[item[0][item[1]>0] for item in list(zip(topics_all,topics_non_idx))]][0]
+      topics_roll=[np.roll(item,shift=-1) for item in non_topics]
+      next_compare=[ x==y for (x,y) in zip(non_topics, topics_roll)]
+      next_compare=[item[:-1] for item in next_compare]
+      Switch_P=np.mean([np.mean(item) for item in next_compare])
+      return Switch_P
+
+
     valid_ppl=[]
     test_ppl=[]
 
-    train_token,train_indic, train_theta_kl,train_phi_theta=[],[],[],[]
+    train_token,train_indic, train_theta_kl,train_phi_theta,train_switch=[],[],[],[],[]
     valid_token,valid_indic, valid_theta_kl,valid_phi_theta=[],[],[],[]
 
     train_loss, valid_loss, test_loss = [], [], []
@@ -211,9 +229,15 @@ class Train(object):
 
     dataset_train, dataset_dev, dataset_test = datasets
     # print('dataset_train_len',len(dataset_train))
+    reverse_vocab=dict(zip(vocab.values(),vocab.keys()))
     pbar=tqdm(range(train_num_batches))
     for _ in pbar:
       batch=next(dataset_train())
+      
+        # print(
+        #   reverse_vocab[item]
+        #   )
+
       train_outputs = self.batch_train(sess, batch)
       train_loss.append(train_outputs["loss"])
       train_phi_theta.append(train_outputs["phi_theta_kl_loss"])
@@ -224,11 +248,46 @@ class Train(object):
       train_repre.append(train_outputs["repre"])
       beta=train_outputs["beta"]
       theta=train_outputs["theta"]      
+
+      topics_all=train_outputs["all_topics"]
+      topics_non_idx=train_outputs["non_stop_indic"]
+
+      translate=[reverse_vocab[item] for item in batch["targets"][0]]
+      indic=[item for item in topics_non_idx[0]]
+
+      # non_topics=[[item[0][item[1]>0] for item in list(zip(topics_all,topics_non_idx))]][0]
+      # topics_roll=[np.roll(item,shift=-1) for item in non_topics]
+      # next_compare=[ x==y for (x,y) in zip(non_topics, topics_roll)]
+      # next_compare=[item[:-1] for item in next_compare]
+      # train_mini=[np.mean(item) for item in next_compare]
+      # train_mini_switch=np.mean([np.mean(item) for item in next_compare])
+
+      train_mini_switch=switch_calc(topics_all,topics_non_idx)
+      train_switch.append(train_mini_switch)
+      # for item in list(zip(translate,indic,topics_all[0],train_outputs["phi"][0])):
+      # for item in list(zip(translate,indic,topics_all[0])):
+      #   print(item)
+      # print('non_topics',non_topics[0])
+      # print('topics_roll',topics_roll[0])
+      # print('next_compare',next_compare[0])
+      # print('train_mini',train_mini[0])
+
+      # print(train_outputs["phi"][0])
+      # print('-'*200)
+      # print("Switch_P",Switch_P)
+
+
+
+
+
+
+
+
       # print('theta_to_beta',theta_to_beta.shape)
       # print('theta',theta.shape)
 
 
-      pbar.set_description("token: %f, theta_kl: %f, indicator: %f, phi_theta: %f" %(train_outputs["token_loss"],train_outputs["theta_kl_loss"],train_outputs["indicator_loss"],train_outputs["phi_theta_kl_loss"]))      
+      pbar.set_description("token: %f, theta_kl: %f, indicator: %f, phi_theta: %f, SwitchP: %f" %(train_outputs["token_loss"],train_outputs["theta_kl_loss"],train_outputs["indicator_loss"],train_outputs["phi_theta_kl_loss"],train_mini_switch))      
       # train_label.append(batch["label"])
       self.writer.add_summary(train_outputs["summary"], train_outputs["global_step"])
       #print(train_outputs)
@@ -262,6 +321,7 @@ class Train(object):
     train_indic=np.mean(train_indic)
     train_theta_kl=np.mean(train_theta_kl)
     train_phi_theta=np.mean(train_phi_theta)
+    train_switch=np.mean(train_switch)
 
     valid_loss = np.mean(valid_loss)
     valid_token=np.mean(valid_token)    
@@ -285,7 +345,7 @@ class Train(object):
     valid_res={"valid_loss":valid_loss,"valid_token":valid_token,"valid_indic":valid_indic,"valid_theta_kl":valid_theta_kl,"valid_phi_theta":valid_phi_theta,"valid_ppl":valid_ppl}
 
     print('\n')
-    print("train_loss: {:.4f}, train_token: {:.4f}, train_indicator: {:.4f}, train_theta_kl: {:.4f}, train_phi_theta: {:.4f}".format(train_loss,train_token,train_indic,train_theta_kl,train_phi_theta))
+    print("train_loss: {:.4f}, train_token: {:.4f}, train_indicator: {:.4f}, train_theta_kl: {:.4f}, train_phi_theta: {:.4f}, train_switch:{:.4f}".format(train_loss,train_token,train_indic,train_theta_kl,train_phi_theta,train_switch))
     print("valid_loss: {:.4f}, valid_token: {:.4f}, valid_indic: {:.4f}    , valid_theta_kl: {:.4f}, valid_phi_theta: {:.4f},  valid_ppl: {:.4f}".format(valid_loss,valid_token,valid_indic,valid_theta_kl,valid_phi_theta,valid_ppl))
     print('\n')
 

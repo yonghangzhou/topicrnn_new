@@ -5,4 +5,7 @@ python main.py --batch_size 200 --num_topics 25 --frequency_limit 25 --num_epoch
 
 python debug_main.py --batch_size 200 --num_topics 20 --frequency_limit 30 --num_epochs 300 --beta_batch 1 --phi_batch 1 --dropout 0.85 --max_seqlen 60 --mixture_lambda 1.0 --theta_batch 0 --lstm_norm 0 --num_units 40 --dim_emb 200 --rnn_lim 0
 
-python debug_main.py --batch_size 200 --num_topics 20 --frequency_limit 25 --num_epochs 300 --beta_batch 1 --phi_batch 1 --dropout 0.85 --max_seqlen 60 --mixture_lambda 1.0 --theta_batch 0 --lstm_norm 0 --num_units 40 --dim_emb 300 --rnn_lim 0   
+python debug_main.py --batch_size 200 --num_topics 20 --frequency_limit 25 --num_epochs 300 --beta_batch 1 --phi_batch 1 --dropout 0.85 --max_seqlen 60 --mixture_lambda 1.0 --theta_batch 0 --lstm_norm 0 --num_units 40 --dim_emb 300 --rnn_lim 0
+
+ python main.py --batch_size 200 --num_topics 10 --frequency_limit 25 --num_epochs 300 --beta_batch 1 --phi_batch 1 --dropout 0.7 --max_seqlen 60 --mixture_lambda 0.95 --num_units 40 --dim_emb 300  
+   

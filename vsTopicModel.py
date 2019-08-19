@@ -79,29 +79,59 @@ class vsTopic(object):
         
     '''Token loss (Reconstruction Loss)'''
     with tf.name_scope("token_loss"):     
-      token_logits = (1-(params["mixture_lambda"]*(1-tf.expand_dims(stop_indicator,-1))))*\
-      tf.expand_dims(tf.nn.softmax(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),-1),2)+\
-      params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(tf.pad(tf.nn.softmax(tf.contrib.layers.batch_norm(self.beta),-1),self.paddings,"CONSTANT"),0)                                            
-
-      # elif params["beta_batch"]==0:
-      #   token_logits = tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2) + params["lambda"]*tf.expand_dims(1-stop_indicator,-1)*tf.expand_dims(self.beta,0)
+      h_prob=tf.expand_dims(tf.nn.softmax(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),-1),2)      
+      b_prob=tf.expand_dims(tf.pad(tf.nn.softmax(tf.contrib.layers.batch_norm(self.beta),-1),self.paddings,"CONSTANT"),0)                                            
+      token_logits = (1-(params["mixture_lambda"]*(1-tf.expand_dims(stop_indicator,-1))))*h_prob+params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*b_prob
       token_loss=tf.log(tf.reduce_sum(target_to_onehot*token_logits,-1)+1e-4)
       token_loss=seq_mask*tf.reduce_sum(self.phi*token_loss,-1)
-      token_ppl = tf.exp(-tf.reduce_sum(token_loss) / (1e-3 + tf.to_float(tf.reduce_sum(inputs["length"]))))
       token_loss = -tf.reduce_mean(tf.reduce_sum(token_loss, axis=-1))
-    
-    ''' Indicator Loss (Softmax Cross Entropy)'''    
+
+
     with tf.name_scope("indicator_loss"):         
-      indicator_logits=tf.nn.dropout(tf.layers.dense(rnn_outputs,2,activation=tf.nn.softplus),inputs["dropout"])
-      labels=1-tf.to_float(tf.one_hot(inputs["indicators"],2))
-      indicator_loss=tf.nn.softmax_cross_entropy_with_logits(
-              _sentinel=None,
-              labels=labels,
-              logits=indicator_logits,
-              dim=-1,
-              name="indicator_loss_softmax",
-          )      
+      indicator_logits = tf.squeeze(tf.layers.dense(rnn_outputs,  units=1,activation=tf.nn.softplus), axis=2)
+      indicator_loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.to_float(inputs["indicators"]),logits=indicator_logits,name="indicator_loss")
       indicator_loss=tf.reduce_mean(tf.reduce_sum(seq_mask*indicator_loss,-1))
+
+
+
+
+
+    with tf.name_scope("Perplexity"):
+        k_temp=tf.nn.sigmoid(indicator_logits)*tf.squeeze(tf.reduce_sum(target_to_onehot*h_prob,-1),-1)
+        token_ppl=tf.exp(-tf.reduce_sum(seq_mask*tf.log(tf.reduce_sum(tf.expand_dims(1-tf.nn.sigmoid(indicator_logits),-1)*self.phi*(1-stop_indicator)*tf.reduce_sum(target_to_onehot*((1-params["mixture_lambda"])*h_prob+params["mixture_lambda"]*b_prob),-1),-1)+k_temp+1e-10))/(1e-10+tf.to_float(tf.reduce_sum(inputs["length"]))))
+
+
+    with tf.name_scope("TextGenerate"):
+      k_text_temp=tf.expand_dims(tf.nn.sigmoid(indicator_logits),-1)*tf.squeeze(h_prob,2)
+      phi_text_temp=tf.reduce_sum(tf.expand_dims(tf.expand_dims(1-tf.nn.sigmoid(indicator_logits),-1)*self.phi*(1-stop_indicator),-1)*((1-params["mixture_lambda"])*h_prob+params["mixture_lambda"]*b_prob),2)
+      # pred_next_token=tf.argmax(k_text_temp+phi_text_temp,-1)
+      # print('pred_next_token',pred_next_token.get_shape())
+      pred_next_token=dist.Categorical(probs=k_text_temp+phi_text_temp).sample()
+      print('pred_next_token',pred_next_token.get_shape())
+        # if inputs["model"]=="Valid":
+        # all_next_probs=tf.reduce_sum(tf.expand_dims(1-tf.nn.sigmoid(indicator_logits),-1)*self.phi*(1-stop_indicator)*((1-params["mixture_lambda"])*h_prob+params["mixture_lambda"]*b_prob)+k_temp
+
+        # k_temp=tf.nn.sigmoid(indicator_logits)
+        # k_temp=tf.reduce_sum(target_to_onehot*h_prob,-1)
+
+
+        # unif_temp=tf.reduce_sum(tf.expand_dims(tf.nn.sigmoid(indicator_logits),-1)
+        # labels_temp=tf.reduce_sum(labels*tf.nn.softmax(indicator_logits),-1)
+        # token_ppl=tf.exp(-tf.reduce_sum(seq_mask*tf.log(phi_temp*labels_temp+1e-10))/(1e-5+tf.to_float(tf.reduce_sum(inputs["length"]))))
+
+          # ,-1)
+        # +1e-10)
+        # print('phi_temp',phi_temp.get_shape())
+        # print('k_temp',k_temp.get_shape())
+
+        # print('labels_temp',labels_temp.get_shape())
+        # print('seq_mask',seq_mask.get_shape())
+
+
+
+
+
+
     ''' KL between Phi and theta '''
     with tf.name_scope("Phi_theta_kl"):
       theta=tf.expand_dims(self.theta,1)
@@ -110,7 +140,11 @@ class vsTopic(object):
     total_loss=token_loss+theta_kl_loss+indicator_loss+phi_theta_kl_loss
 
     with tf.name_scope("SwitchP"):
-      all_topics=tf.argmax(self.phi,-1)
+      # all_topics=tf.argmax(self.phi,-1)
+      cat_topic=dist.Categorical(probs=self.phi)
+      all_topics=cat_topic.sample()
+      # all_topics=tf.self.phi
+
 
 
 
@@ -133,7 +167,8 @@ class vsTopic(object):
         "beta":self.beta,
         "all_topics": all_topics,
         "non_stop_indic":1-inputs["indicators"],
-        "phi":self.phi
+        "phi":self.phi,
+        "pred_next_token":pred_next_token
         }
     return outputs
 
@@ -215,12 +250,12 @@ class Train(object):
       Switch_P=np.mean([np.mean(item) for item in next_compare])
       return Switch_P
 
-
+    train_ppl=[]
     valid_ppl=[]
     test_ppl=[]
 
     train_token,train_indic, train_theta_kl,train_phi_theta,train_switch=[],[],[],[],[]
-    valid_token,valid_indic, valid_theta_kl,valid_phi_theta=[],[],[],[]
+    valid_token,valid_indic, valid_theta_kl,valid_phi_theta,valid_switch=[],[],[],[],[]
 
     train_loss, valid_loss, test_loss = [], [], []
     train_theta, valid_theta, test_theta = [], [], []
@@ -246,14 +281,16 @@ class Train(object):
       train_token.append(train_outputs["token_loss"])
       train_theta.append(train_outputs["theta"])
       train_repre.append(train_outputs["repre"])
+      train_ppl.append(train_outputs["token_ppl"])
+
       beta=train_outputs["beta"]
       theta=train_outputs["theta"]      
 
       topics_all=train_outputs["all_topics"]
       topics_non_idx=train_outputs["non_stop_indic"]
 
-      translate=[reverse_vocab[item] for item in batch["targets"][0]]
-      indic=[item for item in topics_non_idx[0]]
+      # translate=[reverse_vocab[item] for item in batch["targets"][0]]
+      # indic=[item for item in topics_non_idx[0]]
 
       # non_topics=[[item[0][item[1]>0] for item in list(zip(topics_all,topics_non_idx))]][0]
       # topics_roll=[np.roll(item,shift=-1) for item in non_topics]
@@ -287,7 +324,7 @@ class Train(object):
       # print('theta',theta.shape)
 
 
-      pbar.set_description("token: %f, theta_kl: %f, indicator: %f, phi_theta: %f, SwitchP: %f" %(train_outputs["token_loss"],train_outputs["theta_kl_loss"],train_outputs["indicator_loss"],train_outputs["phi_theta_kl_loss"],train_mini_switch))      
+      pbar.set_description("token: %f, theta_kl: %f, indicator: %f, phi_theta: %f, ppx: %f, SwitchP: %f" %(train_outputs["token_loss"],train_outputs["theta_kl_loss"],train_outputs["indicator_loss"],train_outputs["phi_theta_kl_loss"],train_outputs["token_ppl"],train_mini_switch))      
       # train_label.append(batch["label"])
       self.writer.add_summary(train_outputs["summary"], train_outputs["global_step"])
       #print(train_outputs)
@@ -302,19 +339,26 @@ class Train(object):
       valid_theta.append(valid_outputs["theta"])
       valid_repre.append(valid_outputs["repre"])
       valid_ppl.append(valid_outputs["token_ppl"])
+
+      valid_topics_all=valid_outputs["all_topics"]
+      valid_topics_non_idx=valid_outputs["non_stop_indic"]
+      valid_switch.append(switch_calc(valid_topics_all,valid_topics_non_idx))
+
+    valid_text_predict=[reverse_vocab[item] for item in valid_outputs["pred_next_token"][0]]
+    valid_text_predict=" ".join(valid_text_predict)
+    # print('generated text:'," ".join(valid_text_predict))
+
       # self.writer.add_summary(valid_outputs["summary"])
 
       # valid_label.append(batch["label"])
       #print(valid_outputs)
 
-    for batch in dataset_test():
-      test_outputs = self.batch_test(sess, batch)
-      test_loss.append(test_outputs["loss"])
-      test_theta.append(test_outputs["theta"])
-      test_repre.append(test_outputs["repre"])
-      test_ppl.append(test_outputs["token_ppl"])
-      # test_label.append(batch["label"])
-      #print(test_outputs)
+    # for batch in dataset_test():
+    #   test_outputs = self.batch_test(sess, batch)
+    #   test_loss.append(test_outputs["loss"])
+    #   test_theta.append(test_outputs["theta"])
+    #   test_repre.append(test_outputs["repre"])
+    #   test_ppl.append(test_outputs["token_ppl"])
 
     train_loss = np.mean(train_loss)
     train_token=np.mean(train_token)
@@ -322,31 +366,34 @@ class Train(object):
     train_theta_kl=np.mean(train_theta_kl)
     train_phi_theta=np.mean(train_phi_theta)
     train_switch=np.mean(train_switch)
+    train_ppl=np.mean(train_ppl)
 
     valid_loss = np.mean(valid_loss)
     valid_token=np.mean(valid_token)    
     valid_theta_kl=np.mean(valid_theta_kl)
     valid_phi_theta=np.mean(valid_phi_theta)
     valid_indic=np.mean(valid_indic)
+    valid_switch=np.mean(valid_switch)
     valid_ppl=np.mean(valid_ppl)
 
-    test_loss = np.mean(test_loss)
+    # test_loss = np.mean(test_loss)
 
-    train_theta, valid_theta, test_theta = np.vstack(train_theta), np.vstack(valid_theta), np.vstack(test_theta)
-    train_repre, valid_repre, test_repre = np.vstack(train_repre), np.vstack(valid_repre), np.vstack(test_repre)
+    train_theta, valid_theta, test_theta = np.vstack(train_theta), np.vstack(valid_theta), []
+    train_repre, valid_repre, test_repre = np.vstack(train_repre), np.vstack(valid_repre), []
     # train_label, valid_label, test_label = np.vstack(train_label), np.vstack(valid_label), np.vstack(test_label)
 
     # train_res = [train_loss, train_theta, train_repre]
     # valid_res = [valid_loss, valid_theta, valid_repre]
-    test_res = [test_loss, test_theta, test_repre]
+    # test_res = [test_loss, test_theta, test_repre]
     # train_res=[train_loss,train_token,train_indic,train_theta_kl,train_phi_theta]
     # valid_res=[valid_loss,valid_token,valid_indic,valid_theta_kl,valid_phi_theta]    
-    train_res={"train_loss":train_loss,"train_token":train_token,"train_indic":train_indic,"train_theta_kl":train_theta_kl,"train_phi_theta":train_phi_theta}
-    valid_res={"valid_loss":valid_loss,"valid_token":valid_token,"valid_indic":valid_indic,"valid_theta_kl":valid_theta_kl,"valid_phi_theta":valid_phi_theta,"valid_ppl":valid_ppl}
+    test_res=[[]]
+    train_res={"train_loss":train_loss,"train_token":train_token,"train_indic":train_indic,"train_theta_kl":train_theta_kl,"train_phi_theta":train_phi_theta,"train_ppl":train_ppl}
+    valid_res={"valid_loss":valid_loss,"valid_token":valid_token,"valid_indic":valid_indic,"valid_theta_kl":valid_theta_kl,"valid_phi_theta":valid_phi_theta,"valid_ppl":valid_ppl,"valid_gen":valid_text_predict,"valid_switch":valid_switch}
 
     print('\n')
-    print("train_loss: {:.4f}, train_token: {:.4f}, train_indicator: {:.4f}, train_theta_kl: {:.4f}, train_phi_theta: {:.4f}, train_switch:{:.4f}".format(train_loss,train_token,train_indic,train_theta_kl,train_phi_theta,train_switch))
-    print("valid_loss: {:.4f}, valid_token: {:.4f}, valid_indic: {:.4f}    , valid_theta_kl: {:.4f}, valid_phi_theta: {:.4f},  valid_ppl: {:.4f}".format(valid_loss,valid_token,valid_indic,valid_theta_kl,valid_phi_theta,valid_ppl))
+    print("train_loss: {:.4f}, train_token: {:.4f}, train_indicator: {:.4f}, train_theta_kl: {:.4f}, train_phi_theta: {:.4f}, train_switch:{:.4f}, train_ppl: {:.4f}".format(train_loss,train_token,train_indic,train_theta_kl,train_phi_theta,train_switch,train_ppl))
+    print("valid_loss: {:.4f}, valid_token: {:.4f}, valid_indic: {:.4f}    , valid_theta_kl: {:.4f}, valid_phi_theta: {:.4f}, valid_switch:{:.4f}, valid_ppl: {:.4f}".format(valid_loss,valid_token,valid_indic,valid_theta_kl,valid_phi_theta,valid_switch,valid_ppl))
     print('\n')
 
     return train_res, valid_res, test_res,beta
@@ -355,7 +402,7 @@ class Train(object):
     best_valid_loss = 1e10
     self.writer = tf.summary.FileWriter(os.path.join(self.params["save_dir"], "train"), sess.graph)
     train_dict={"train_loss":[],"train_token":[],"train_indic":[],"train_theta_kl":[],"train_phi_theta":[]}
-    valid_dict={"valid_loss":[],"valid_token":[],"valid_indic":[],"valid_theta_kl":[],"valid_phi_theta":[],"valid_ppl":[]}
+    valid_dict={"valid_loss":[],"valid_token":[],"valid_indic":[],"valid_theta_kl":[],"valid_phi_theta":[],"valid_ppl":[],"valid_switch":[]}
     # valid_loss_all={"valid_loss":[],"valid_token":[],"valid_indic":[],"valid_theta_kl":[],"valid_phi_theta":[]}
 
     for i in range(self.params["num_epochs"]):
@@ -366,6 +413,7 @@ class Train(object):
         valid_dict[key].append(valid_res[key])
       if i%4==0:
         beta_list,beta_values=print_top_words(beta, list(zip(*sorted(vocab.items(), key=lambda x: x[1])))[0],name_beta="")            
+    valid_dict["valid_gen"]=valid_res["valid_gen"]
     dir_path = os.path.dirname(os.path.realpath(__file__))
     with open(os.path.join(dir_path+"/"+self.params["save_dir"], save_info[1]+".pkl"), "wb") as f:
       beta_dict={"beta_names":beta_list,"beta_values":beta_values}

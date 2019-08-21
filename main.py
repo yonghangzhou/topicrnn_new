@@ -4,7 +4,9 @@ import pickle as pkl
 import numpy as np
 import sys
 # import model
-import vsTopicModel
+# import vsTopicModel
+import ComVsTopic
+
 # import debug_lda
 import tensorflow as tf
 import collections
@@ -28,7 +30,7 @@ parser.add_argument("--num_units", type=int, default=200, help="num of units")
 parser.add_argument("--num_hidden", type=int, default=500, help="hidden units of inference network")
 parser.add_argument("--dim_emb", type=int, default=300, help="dimension of embedding")
 parser.add_argument("--num_topics", type=int, default=5, help="number of topics")
-parser.add_argument("--num_layers", type=int, default=1, help="number of layers")
+parser.add_argument("--num_layers", type=int, default=2, help="number of layers")
 parser.add_argument("--learning_rate", type=float, default=1e-3, help="learning rate")
 parser.add_argument("--dropout", type=float, default=0.7, help="dropout")
 parser.add_argument("--lambda", type=float, default=1.0, help="coefficient for beta")
@@ -158,7 +160,7 @@ def main():
   configproto.gpu_options.allow_growth = True
   configproto.allow_soft_placement = True
   with tf.Session(config=configproto) as sess:
-    train =  vsTopicModel.Train(vars(params))
+    train =  ComVsTopic.Train(vars(params))
     train.build_graph()
 
     if params.init_from:

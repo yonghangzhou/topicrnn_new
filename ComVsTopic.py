@@ -79,11 +79,14 @@ class vsTopic(object):
         
     '''Token loss (Reconstruction Loss)'''
     with tf.name_scope("token_loss"):     
-      h_prob=tf.expand_dims(tf.nn.softmax(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),-1),2)      
-      b_prob=tf.expand_dims(tf.pad(tf.nn.softmax(tf.contrib.layers.batch_norm(self.beta),-1),self.paddings,"CONSTANT"),0)                                            
-      token_logits = (1-(params["mixture_lambda"]*(1-tf.expand_dims(stop_indicator,-1))))*h_prob+params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*b_prob
+      # h_prob=tf.expand_dims(tf.nn.softmax(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),-1),2)      
+      # b_prob=tf.expand_dims(tf.pad(tf.nn.softmax(tf.contrib.layers.batch_norm(self.beta),-1),self.paddings,"CONSTANT"),0)                                            
+      # token_logits = (1-(params["mixture_lambda"]*(1-tf.expand_dims(stop_indicator,-1))))*h_prob+params["mixture_lambda"]*tf.expand_dims(1-stop_indicator,-1)*b_prob
+      token_logits=tf.nn.softmax(tf.expand_dims(tf.layers.dense(rnn_outputs, units=self.vocab_size, use_bias=False),2)+((1-tf.expand_dims(stop_indicator,-1))* tf.pad(tf.contrib.layers.batch_norm(self.beta),self.paddings,"CONSTANT")),-1)
+
       token_loss=tf.log(tf.reduce_sum(target_to_onehot*token_logits,-1)+1e-4)
       token_loss=seq_mask*tf.reduce_sum(self.phi*token_loss,-1)
+      token_ppl = tf.exp(-tf.reduce_sum(token_loss) / (1e-3 + tf.to_float(tf.reduce_sum(inputs["length"]))))      
       token_loss = -tf.reduce_mean(tf.reduce_sum(token_loss, axis=-1))
 
 
@@ -96,15 +99,17 @@ class vsTopic(object):
 
 
 
-    with tf.name_scope("Perplexity"):
-        k_temp=tf.nn.sigmoid(indicator_logits)*tf.squeeze(tf.reduce_sum(target_to_onehot*h_prob,-1),-1)
-        token_ppl=tf.exp(-tf.reduce_sum(seq_mask*tf.log(tf.reduce_sum(tf.expand_dims(1-tf.nn.sigmoid(indicator_logits),-1)*self.phi*(1-stop_indicator)*tf.reduce_sum(target_to_onehot*((1-params["mixture_lambda"])*h_prob+params["mixture_lambda"]*b_prob),-1),-1)+k_temp+1e-10))/(1e-10+tf.to_float(tf.reduce_sum(inputs["length"]))))
-
+    # with tf.name_scope("Perplexity"):
+        # k_temp=tf.nn.sigmoid(indicator_logits)*tf.squeeze(tf.reduce_sum(target_to_onehot*h_prob,-1),-1)
+        # token_ppl=tf.exp(-tf.reduce_sum(seq_mask*tf.log(tf.reduce_sum(tf.expand_dims(1-tf.nn.sigmoid(indicator_logits),-1)*self.phi*(1-stop_indicator)*tf.reduce_sum(target_to_onehot*((1-params["mixture_lambda"])*h_prob+params["mixture_lambda"]*b_prob),-1),-1)+k_temp+1e-10))/(1e-10+tf.to_float(tf.reduce_sum(inputs["length"]))))
+        # token_ppl=0
 
     with tf.name_scope("TextGenerate"):
-      k_text_temp=tf.expand_dims(tf.nn.sigmoid(indicator_logits),-1)*tf.squeeze(h_prob,2)
-      phi_text_temp=tf.reduce_sum(tf.expand_dims(tf.expand_dims(1-tf.nn.sigmoid(indicator_logits),-1)*self.phi*(1-stop_indicator),-1)*((1-params["mixture_lambda"])*h_prob+params["mixture_lambda"]*b_prob),2)
-      pred_next_token=tf.argmax(k_text_temp+phi_text_temp,-1)
+      pred_next_token=inputs["tokens"]
+      # k_text_temp=tf.expand_dims(tf.nn.sigmoid(indicator_logits),-1)*tf.squeeze(h_prob,2)
+      # phi_text_temp=tf.reduce_sum(tf.expand_dims(tf.expand_dims(1-tf.nn.sigmoid(indicator_logits),-1)*self.phi*(1-stop_indicator),-1)*((1-params["mixture_lambda"])*h_prob+params["mixture_lambda"]*b_prob),2)
+      # pred_next_token=tf.argmax(k_text_temp+phi_text_temp,-1)
+
       # print('pred_next_token',pred_next_token.get_shape())
       # pred_next_token=dist.Categorical(probs=k_text_temp+phi_text_temp).sample()
       print('pred_next_token',pred_next_token.get_shape())

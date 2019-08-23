@@ -4,8 +4,8 @@ import pickle as pkl
 import numpy as np
 import sys
 # import model
-# import vsTopicModel
-import ComVsTopic
+import vsTopicModel
+# import ComVsTopic
 
 # import debug_lda
 import tensorflow as tf
@@ -28,7 +28,7 @@ parser.add_argument("--frequency_limit", type=int, default=5, help="limit of rep
 parser.add_argument("--max_seqlen", type=int, default=100, help="maximum sequence length")
 parser.add_argument("--num_units", type=int, default=200, help="num of units")
 parser.add_argument("--num_hidden", type=int, default=500, help="hidden units of inference network")
-parser.add_argument("--dim_emb", type=int, default=300, help="dimension of embedding")
+parser.add_argument("--dim_emb", type=int, default=400, help="dimension of embedding")
 parser.add_argument("--num_topics", type=int, default=5, help="number of topics")
 parser.add_argument("--num_layers", type=int, default=2, help="number of layers")
 parser.add_argument("--learning_rate", type=float, default=1e-3, help="learning rate")
@@ -81,7 +81,9 @@ def load_dataset(params,frequency_limit):
       with open(filename, "r") as f:
         lines = f.readlines()
         data = list(map(lambda s: s.strip().split(), lines))
-        data=[[vocab.get(x,vocab[UNK]) for x in line if x in vocab.keys()] for line in data]      
+        # data=[[vocab.get(x,vocab[UNK]) for x in line if x in vocab.keys()] for line in data]      
+        data=[[vocab.get(x,vocab[UNK]) for x in line ] for line in data]      
+
 
         return data
     train_x = get_data(dir_path+"/datasets/VIST_max_dataset/train_data_dii_sis.txt",vocab,params.vocab_size)
@@ -160,7 +162,7 @@ def main():
   configproto.gpu_options.allow_growth = True
   configproto.allow_soft_placement = True
   with tf.Session(config=configproto) as sess:
-    train =  ComVsTopic.Train(vars(params))
+    train =  vsTopicModel.Train(vars(params))
     train.build_graph()
 
     if params.init_from:

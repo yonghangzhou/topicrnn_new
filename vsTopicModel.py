@@ -15,7 +15,7 @@ def print_top_words(beta, feature_names, n_top_words=20,name_beta=" "):
   for i in range(len(beta)):  
     beta_values.append(" ".join([" ".join([feature_names[j],':',str(beta[i][j]),', ']) for j in beta[i].argsort()[:-n_top_words - 1:-1]]))    
     beta_list.append(" ".join([feature_names[j] for j in beta[i].argsort()[:-n_top_words - 1:-1]]))
-    print(" ".join([feature_names[j] for j in beta[i].argsort()[:-n_top_words - 1:-1]]))
+    print(i,": "," ".join([feature_names[j] for j in beta[i].argsort()[:-n_top_words - 1:-1]]))
   print ('---------------End of Topics------------------')    
   return(beta_list,beta_values)
 
@@ -58,9 +58,10 @@ class vsTopic(object):
     with tf.name_scope("theta"):
         emb_wo=tf.expand_dims(inputs["frequency"],-1)*tf.nn.embedding_lookup(self.embedding,inputs["targets"])          
         alpha = tf.nn.softplus(tf.tensordot(emb_wo,self.theta_weight,[[1,2],[0,1]]))
+        self.theta_point=alpha/(tf.expand_dims(tf.reduce_sum(alpha,-1),-1)+1e-10)
 
 
-        gamma = tf.ones_like(alpha)
+        gamma =(5./self.num_topics)*tf.ones_like(alpha)
 
         pst_dist = tf.distributions.Dirichlet(alpha)
         pri_dist = tf.distributions.Dirichlet(gamma)
@@ -73,7 +74,9 @@ class vsTopic(object):
 
     ''' Phi Matrix '''   
     with tf.name_scope("Phi"):   
-      self.phi=tf.nn.dropout(tf.nn.softmax(tf.contrib.layers.batch_norm(tf.layers.dense(emb_wo,self.num_topics),-1)),inputs["dropout"])
+      self.phi=tf.nn.dropout(tf.nn.softmax(tf.contrib.layers.batch_norm(tf.layers.dense(emb_wo,self.num_topics),-1)),inputs["dropout"])      
+      # self.phi=tf.nn.dropout(tf.nn.softmax(tf.layers.dense(emb_wo,self.num_topics),-1),inputs["dropout"])
+
       self.phi=((1-stop_indicator)*self.phi)+((stop_indicator)*(1./self.num_topics))
 
         
@@ -88,9 +91,13 @@ class vsTopic(object):
 
 
     with tf.name_scope("indicator_loss"):         
-      indicator_logits = tf.squeeze(tf.layers.dense(rnn_outputs,  units=1,activation=tf.nn.softplus), axis=2)
+      # indicator_logits = tf.squeeze(tf.layers.dense(rnn_outputs,  units=1,activation=tf.nn.softplus), axis=2)
+      indicator_logits = tf.squeeze(tf.contrib.layers.batch_norm(tf.layers.dense(tf.layers.dense(rnn_outputs,  units=5,activation=tf.nn.softplus),units=1,activation=tf.nn.softplus)), axis=2)
+
       indicator_loss = tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.to_float(inputs["indicators"]),logits=indicator_logits,name="indicator_loss")
       indicator_loss=tf.reduce_mean(tf.reduce_sum(seq_mask*indicator_loss,-1))
+      indicator_acc=tf.reduce_mean(tf.to_float(tf.equal(tf.round(tf.nn.sigmoid(indicator_logits)),tf.to_float(inputs["indicators"]))),-1)
+      indicator_acc=tf.reduce_mean(indicator_acc)
 
 
 
@@ -104,10 +111,22 @@ class vsTopic(object):
     with tf.name_scope("TextGenerate"):
       k_text_temp=tf.expand_dims(tf.nn.sigmoid(indicator_logits),-1)*tf.squeeze(h_prob,2)
       phi_text_temp=tf.reduce_sum(tf.expand_dims(tf.expand_dims(1-tf.nn.sigmoid(indicator_logits),-1)*self.phi*(1-stop_indicator),-1)*((1-params["mixture_lambda"])*h_prob+params["mixture_lambda"]*b_prob),2)
-      pred_next_token=tf.argmax(k_text_temp+phi_text_temp,-1)
+      # pred_next_token=tf.argmax(k_text_temp+phi_text_temp,-1)
+      pred_next_token=dist.Categorical(probs=k_text_temp+phi_text_temp).sample()
+
+
+    with tf.name_scope("TextGenerateTheta"):
+      # theta_text_temp=tf.reduce_sum(tf.expand_dims(tf.expand_dims(1-tf.nn.sigmoid(indicator_logits),-1)*tf.expand_dims(self.theta,1),-1)*((1-params["mixture_lambda"])*h_prob+params["mixture_lambda"]*b_prob),2)
+      theta_text_temp=tf.reduce_sum(tf.expand_dims(tf.expand_dims(1-tf.nn.sigmoid(indicator_logits),-1)*tf.expand_dims(self.theta_point,1),-1)*((1-params["mixture_lambda"])*h_prob+params["mixture_lambda"]*b_prob),2)
+
+      # pred_next_token_theta=tf.argmax(k_text_temp+theta_text_temp,-1)
+      pred_next_token_theta=dist.Categorical(probs=k_text_temp+theta_text_temp).sample()
+      print('-'*50)
+      print('pred_next_token_theta',pred_next_token_theta.get_shape())
+      print('-'*50)
+
       # print('pred_next_token',pred_next_token.get_shape())
-      # pred_next_token=dist.Categorical(probs=k_text_temp+phi_text_temp).sample()
-      print('pred_next_token',pred_next_token.get_shape())
+      # print('pred_next_token',pred_next_token.get_shape())
         # if inputs["model"]=="Valid":
         # all_next_probs=tf.reduce_sum(tf.expand_dims(1-tf.nn.sigmoid(indicator_logits),-1)*self.phi*(1-stop_indicator)*((1-params["mixture_lambda"])*h_prob+params["mixture_lambda"]*b_prob)+k_temp
 
@@ -141,13 +160,21 @@ class vsTopic(object):
 
     with tf.name_scope("SwitchP"):
       all_topics=tf.argmax(self.phi,-1)
-      # cat_topic=dist.Categorical(probs=self.phi)
+
+    with tf.name_scope("Entropies"):
+      # phi_entropy=tf.reduce_mean(tf.reduce_sum(tf.to_float(1-inputs["indicators"])*tf.reduce_sum(-self.phi*tf.log(self.phi+1e-10),-1),-1)/tf.reduce_sum(tf.to_float(1-inputs["indicators"])),-1)      
+      theta_entropy=tf.reduce_mean(tf.reduce_sum(-self.theta*tf.log(self.theta+1e-10),-1))      
+      phi_entropy=tf.reduce_mean(tf.reduce_sum(tf.to_float(1-inputs["indicators"])*tf.reduce_sum(-self.phi*tf.log(self.phi+1e-10),-1),-1)/tf.reduce_sum(tf.to_float(1-inputs["indicators"])),-1)
+      # print('-'*100)
+      # print('theta_entropy',theta_entropy.get_shape())
+      # print('-'*100)
+
+      # all_topics=dist.Categorical(probs=self.phi).sample()
       # cat_topic=dist.Categorical(probs=self.theta)
 
       # all_topics=tf.transpose(cat_topic.sample(sample_shape=[self.phi.get_shape()[1]]))
-      print('-'*100)
-      print('all_topics',all_topics.get_shape())
-      print('-'*100)
+      # print('all_topics',all_topics.get_shape())
+      # print('-'*100)
 
       # all_topics=tf.self.phi
 
@@ -174,7 +201,11 @@ class vsTopic(object):
         "all_topics": all_topics,
         "non_stop_indic":1-inputs["indicators"],
         "phi":self.phi,
-        "pred_next_token":pred_next_token
+        "pred_next_token":pred_next_token,
+        "accuracy":indicator_acc,
+        "pred_next_token_theta":pred_next_token_theta,
+        "theta_entropy":theta_entropy,
+        # "phi_entropy":phi_entropy
         }
     return outputs
 
@@ -260,8 +291,8 @@ class Train(object):
     valid_ppl=[]
     test_ppl=[]
 
-    train_token,train_indic, train_theta_kl,train_phi_theta,train_switch=[],[],[],[],[]
-    valid_token,valid_indic, valid_theta_kl,valid_phi_theta,valid_switch=[],[],[],[],[]
+    train_token,train_indic, train_theta_kl,train_phi_theta,train_switch,train_acc,train_theta_ent=[],[],[],[],[],[],[]
+    valid_token,valid_indic, valid_theta_kl,valid_phi_theta,valid_switch,valid_acc=[],[],[],[],[],[]
 
     train_loss, valid_loss, test_loss = [], [], []
     train_theta, valid_theta, test_theta = [], [], []
@@ -288,6 +319,9 @@ class Train(object):
       train_theta.append(train_outputs["theta"])
       train_repre.append(train_outputs["repre"])
       train_ppl.append(train_outputs["token_ppl"])
+      train_acc.append(train_outputs["accuracy"])
+      train_theta_ent.append(train_outputs["theta_entropy"])
+
 
       beta=train_outputs["beta"]
       theta=train_outputs["theta"]      
@@ -298,8 +332,7 @@ class Train(object):
       # translate=[reverse_vocab[item] for item in batch["targets"][0]]
       # indic=[item for item in topics_non_idx[0]]
 
-      non_topics=[[item[0][item[1]>0] for item in list(zip(topics_all,topics_non_idx))]][0]
-      topics_roll=[np.roll(item,shift=-1) for item in non_topics]
+      # topics_roll=[np.roll(item,shift=-1) for item in non_topics]
       # next_compare=[ x==y for (x,y) in zip(non_topics, topics_roll)]
       # next_compare=[item[:-1] for item in next_compare]
       # train_mini=[np.mean(item) for item in next_compare]
@@ -330,10 +363,42 @@ class Train(object):
       # print('theta_to_beta',theta_to_beta.shape)
       # print('theta',theta.shape)
 
+      # non_topics=[[(item[0][item[1]>0],item[2][item[1]>0]) for item in list(zip(topics_all,topics_non_idx,batch["targets"]))]][0]
+      # for item in list(zip(topics_all,topics_non_idx,batch["targets"])):
+      #   print(item)
+      # for item in non_topics[0:3]:
+      #   print('item:',item)
+      # print("phi_shape",train_outputs["phi"][15:18].shape)
+      # print("topics_non_idx",topics_non_idx[15:18].shape)
 
-      pbar.set_description("token: %f, theta_kl: %f, indicator: %f, phi_theta: %f, ppx: %f, SwitchP: %f" %(train_outputs["token_loss"],train_outputs["theta_kl_loss"],train_outputs["indicator_loss"],train_outputs["phi_theta_kl_loss"],train_outputs["token_ppl"],train_mini_switch))      
+      # train_phi=[item[0][item[1]>0] for item in list(zip(train_outputs["phi"][15],topics_non_idx[15]))]
+      # print('train_phi',train_phi)
+
+      # pbar.set_description("token: %f, theta_kl: %f, indicator: %f, phi_theta: %f, ppx: %f, acc: %f,theta_entropy: %f,phi_entropy: %f, SwitchP: %f" %(train_outputs["token_loss"],train_outputs["theta_kl_loss"],train_outputs["indicator_loss"],train_outputs["phi_theta_kl_loss"],train_outputs["token_ppl"],train_outputs["accuracy"],train_outputs["theta_entropy"],train_outputs["phi_entropy"],train_mini_switch))      
+      pbar.set_description("token: %f, theta_kl: %f, indicator: %f, phi_theta: %f, ppx: %f, theta_entropy: %f, SwitchP: %f" %(train_outputs["token_loss"],train_outputs["theta_kl_loss"],train_outputs["indicator_loss"],train_outputs["phi_theta_kl_loss"],train_outputs["token_ppl"],train_outputs["theta_entropy"],train_mini_switch))      
+
       # train_label.append(batch["label"])
       self.writer.add_summary(train_outputs["summary"], train_outputs["global_step"])
+
+    phi_vec=train_outputs["phi"][15][topics_non_idx[15]>0]
+    phi_entropy=[np.sum(-item*np.log(item)) for item in phi_vec]
+    print('theta_vec: ',train_outputs["theta"][15:18])
+    print('theta_entropy: ',[-np.sum(np.array(theta)*np.log(np.array(theta)+1e-10)) for theta in train_outputs["theta"][15:18]])
+    print('phi_entropy',phi_entropy)
+    non_topics=[[([reverse_vocab[word] for word in item[2][item[1]>0]],item[0][item[1]>0]) for item in list(zip(topics_all[15:18],topics_non_idx[15:18],batch["targets"][15:18]))]][0]
+    for item in non_topics:
+      print(list(zip(item[0],item[1])))
+      print('\n')
+    # non_topics=[[(item[0][item[1]>0],[reverse_vocab[word] for word in item[2][item[1]>0]]) for item in list(zip(topics_all[0:3],topics_non_idx[0:3],batch["targets"][0:3]))]][0]
+
+      # print(dict(item))
+
+
+
+
+
+    # word_vs_topics=[[item[0][item[1]>0] for item in list(zip(batch["targets"],topics_non_idx))]][0]      
+
       #print(train_outputs)
     # print_top_words(beta, list(zip(*sorted(vocab.items(), key=lambda x: x[1])))[0],name_beta="")            
     # print('batch: '," ".join([reverse_vocab[item] for item in batch["targets"][0]]))
@@ -353,6 +418,8 @@ class Train(object):
       valid_theta.append(valid_outputs["theta"])
       valid_repre.append(valid_outputs["repre"])
       valid_ppl.append(valid_outputs["token_ppl"])
+      valid_acc.append(valid_outputs["accuracy"])
+
 
       valid_topics_all=valid_outputs["all_topics"]
       valid_topics_non_idx=valid_outputs["non_stop_indic"]
@@ -360,7 +427,19 @@ class Train(object):
 
     valid_text_predict=[reverse_vocab[item] for item in valid_outputs["pred_next_token"][0]]
     valid_text_predict=" ".join(valid_text_predict)
-    print('generated text:',valid_text_predict)
+    valid_text_predict_theta=[reverse_vocab[item] for item in valid_outputs["pred_next_token_theta"][0]]
+    valid_text_predict_theta=" ".join(valid_text_predict_theta)
+
+    original_text=[reverse_vocab[item] for item in batch["targets"][0]]
+    original_text=" ".join(original_text)
+
+    print('-'*30)
+    # print("\033[1;32;40m Bright Green  \033[0m\n")
+    # print("\033[0;37;40m Normal text \033[0m\n")
+    print('original text: ',original_text,'\n')
+    print('\033[94m generated_phi:',valid_text_predict,'\033[0m\n')
+    print('\033[92m generated_theta: ',valid_text_predict_theta,'\033[0m')
+    print('-'*30)
 
       # self.writer.add_summary(valid_outputs["summary"])
 
@@ -381,6 +460,8 @@ class Train(object):
     train_phi_theta=np.mean(train_phi_theta)
     train_switch=np.mean(train_switch)
     train_ppl=np.mean(train_ppl)
+    train_acc=np.mean(train_acc)
+    train_theta_ent=np.mean(train_theta_ent)
 
     valid_loss = np.mean(valid_loss)
     valid_token=np.mean(valid_token)    
@@ -389,6 +470,7 @@ class Train(object):
     valid_indic=np.mean(valid_indic)
     valid_switch=np.mean(valid_switch)
     valid_ppl=np.mean(valid_ppl)
+    valid_acc=np.mean(valid_acc)
 
     # test_loss = np.mean(test_loss)
 
@@ -402,12 +484,12 @@ class Train(object):
     # train_res=[train_loss,train_token,train_indic,train_theta_kl,train_phi_theta]
     # valid_res=[valid_loss,valid_token,valid_indic,valid_theta_kl,valid_phi_theta]    
     test_res=[[]]
-    train_res={"train_loss":train_loss,"train_token":train_token,"train_indic":train_indic,"train_theta_kl":train_theta_kl,"train_phi_theta":train_phi_theta,"train_ppl":train_ppl}
-    valid_res={"valid_loss":valid_loss,"valid_token":valid_token,"valid_indic":valid_indic,"valid_theta_kl":valid_theta_kl,"valid_phi_theta":valid_phi_theta,"valid_ppl":valid_ppl,"valid_gen":valid_text_predict,"valid_switch":valid_switch}
+    train_res={"train_loss":train_loss,"train_token":train_token,"train_indic":train_indic,"train_theta_kl":train_theta_kl,"train_phi_theta":train_phi_theta,"train_ppl":train_ppl,"train_acc":train_acc}
+    valid_res={"valid_loss":valid_loss,"valid_token":valid_token,"valid_indic":valid_indic,"valid_theta_kl":valid_theta_kl,"valid_phi_theta":valid_phi_theta,"valid_ppl":valid_ppl,"valid_gen":valid_text_predict,"valid_switch":valid_switch,"valid_acc":valid_acc}
 
     print('\n')
-    print("train_loss: {:.4f}, train_token: {:.4f}, train_indicator: {:.4f}, train_theta_kl: {:.4f}, train_phi_theta: {:.4f}, train_switch:{:.4f}, train_ppl: {:.4f}".format(train_loss,train_token,train_indic,train_theta_kl,train_phi_theta,train_switch,train_ppl))
-    print("valid_loss: {:.4f}, valid_token: {:.4f}, valid_indic: {:.4f}    , valid_theta_kl: {:.4f}, valid_phi_theta: {:.4f}, valid_switch:{:.4f}, valid_ppl: {:.4f}".format(valid_loss,valid_token,valid_indic,valid_theta_kl,valid_phi_theta,valid_switch,valid_ppl))
+    print("train_loss: {:.4f}, train_token: {:.4f}, train_indicator: {:.4f}, train_theta_kl: {:.4f}, train_phi_theta: {:.4f}, train_switch:{:.4f}, train_ppl: {:.4f}, train_theta_ent: {:.4f}, train_acc: {:.4f}".format(train_loss,train_token,train_indic,train_theta_kl,train_phi_theta,train_switch,train_ppl,train_theta_ent,train_acc))
+    print("valid_loss: {:.4f}, valid_token: {:.4f}, valid_indic: {:.4f}    , valid_theta_kl: {:.4f}, valid_phi_theta: {:.4f}, valid_switch:{:.4f}, valid_ppl: {:.4f}, valid_acc: {:.4f}".format(valid_loss,valid_token,valid_indic,valid_theta_kl,valid_phi_theta,valid_switch,valid_ppl,valid_acc))
     print('\n')
 
     return train_res, valid_res, test_res,beta
@@ -415,8 +497,8 @@ class Train(object):
   def run(self, sess, datasets,train_num_batches,vocab,save_info):
     best_valid_loss = 1e10
     self.writer = tf.summary.FileWriter(os.path.join(self.params["save_dir"], "train"), sess.graph)
-    train_dict={"train_loss":[],"train_token":[],"train_indic":[],"train_theta_kl":[],"train_phi_theta":[]}
-    valid_dict={"valid_loss":[],"valid_token":[],"valid_indic":[],"valid_theta_kl":[],"valid_phi_theta":[],"valid_ppl":[],"valid_switch":[]}
+    train_dict={"train_loss":[],"train_token":[],"train_indic":[],"train_theta_kl":[],"train_phi_theta":[],"train_acc":[]}
+    valid_dict={"valid_loss":[],"valid_token":[],"valid_indic":[],"valid_theta_kl":[],"valid_phi_theta":[],"valid_ppl":[],"valid_switch":[],"valid_acc":[]}
     # valid_loss_all={"valid_loss":[],"valid_token":[],"valid_indic":[],"valid_theta_kl":[],"valid_phi_theta":[]}
 
     for i in range(self.params["num_epochs"]):

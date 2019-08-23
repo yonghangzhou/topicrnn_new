@@ -61,7 +61,7 @@ class vsTopic(object):
         self.theta_point=alpha/(tf.expand_dims(tf.reduce_sum(alpha,-1),-1)+1e-10)
 
 
-        gamma =(5./self.num_topics)*tf.ones_like(alpha)
+        gamma =params["prior"]*tf.ones_like(alpha)
 
         pst_dist = tf.distributions.Dirichlet(alpha)
         pri_dist = tf.distributions.Dirichlet(gamma)

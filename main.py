@@ -42,6 +42,7 @@ parser.add_argument("--lstm_norm",type=int,default=0,help="Using LayerNormBasicL
 parser.add_argument("--beta_sftmx",type=int,default=0,help="Adding Softmax to Beta matrix; (phi_batch flag should be 0 in this case)")
 parser.add_argument("--rnn_lim", type=int, default=0, help="adding coefficient for rnn ")
 parser.add_argument("--mixture_lambda",type=float,default=0.5,help="mixture paramater for combining h and beta")
+parser.add_argument("--prior",type=float,default=1.,help="gamma coefficient")
 
 
 

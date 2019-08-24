@@ -4,8 +4,8 @@ import pickle as pkl
 import numpy as np
 import sys
 # import model
-import vsTopicModel
-# import ComVsTopic
+# import vsTopicModel
+import ComVsTopic
 
 # import debug_lda
 import tensorflow as tf
@@ -154,7 +154,7 @@ def main():
   params_str=str(vars(params))
 
   params.stop_words = np.asarray([1 if i in stop_words_ids else 0 for i in range(params.vocab_size)])
-  save_file_name='k_'+str(params.num_topics)+'_dout_'+str(params.dropout)+'_mixture_lambda_'+str(params.mixture_lambda)+'_nunt_'+str(params.num_units)
+  save_file_name='com_k_'+str(params.num_topics)+'_prior_'+str(params.prior)+'_mixture_lambda_'+str(params.mixture_lambda)+'_nunt_'+str(params.num_units)
 
 
   save_info=[params_str,save_file_name]
@@ -163,7 +163,7 @@ def main():
   configproto.gpu_options.allow_growth = True
   configproto.allow_soft_placement = True
   with tf.Session(config=configproto) as sess:
-    train =  vsTopicModel.Train(vars(params))
+    train =  ComVsTopic.Train(vars(params))
     train.build_graph()
 
     if params.init_from:

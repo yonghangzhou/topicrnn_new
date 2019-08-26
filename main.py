@@ -43,6 +43,7 @@ parser.add_argument("--beta_sftmx",type=int,default=0,help="Adding Softmax to Be
 parser.add_argument("--rnn_lim", type=int, default=0, help="adding coefficient for rnn ")
 parser.add_argument("--mixture_lambda",type=float,default=0.5,help="mixture paramater for combining h and beta")
 parser.add_argument("--prior",type=float,default=1.,help="gamma coefficient")
+parser.add_argument("--generate_len",type=int,default=20,help="The length of the sentence to generate")
 
 
 
@@ -154,7 +155,7 @@ def main():
   params_str=str(vars(params))
 
   params.stop_words = np.asarray([1 if i in stop_words_ids else 0 for i in range(params.vocab_size)])
-  save_file_name='com_k_'+str(params.num_topics)+'_prior_'+str(params.prior)+'_mixture_lambda_'+str(params.mixture_lambda)+'_nunt_'+str(params.num_units)
+  save_file_name='com_gen_k_'+str(params.num_topics)+'_prior_'+str(params.prior)+'_mixture_lambda_'+str(params.mixture_lambda)+'_nunt_'+str(params.num_units)
 
 
   save_info=[params_str,save_file_name]

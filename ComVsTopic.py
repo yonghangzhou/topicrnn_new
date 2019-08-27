@@ -351,10 +351,20 @@ class Train(object):
       valid_topics_non_idx=valid_outputs["non_stop_indic"]
       valid_switch.append(switch_calc(valid_topics_all,valid_topics_non_idx))
 
+    test_res=[[]]
     self.sample_text=[]
     if epoch_num==(self.params["num_epochs"]-1):
-      self.sample_text=self.test_textGen(sess)    
-      print('sample_text: ',self.sample_text,'\n')
+      for batch in dataset_test():
+        test_outputs = self.batch_test(sess, batch)        
+        test_ppl.append(test_outputs["token_ppl"])
+      test_ppl=np.mean(test_ppl)      
+      test_res={"test_ppl":test_ppl}
+      print("test ==> ppl: {:.4f}".format(test_ppl))
+
+
+      for _ in range(10):
+        self.sample_text.append([self.test_textGen(sess)])
+        # print('gen_text: ',self.sample_text,'\n')
 
     train_loss = np.mean(train_loss)
     train_token=np.mean(train_token)
@@ -378,6 +388,7 @@ class Train(object):
     valid_theta_ent=np.mean(valid_theta_ent)
     valid_phi_ent=np.mean(valid_phi_ent)    
 
+
     # test_loss = np.mean(test_loss)
 
     train_theta, valid_theta, test_theta = np.vstack(train_theta), np.vstack(valid_theta), []
@@ -389,9 +400,10 @@ class Train(object):
     # test_res = [test_loss, test_theta, test_repre]
     # train_res=[train_loss,train_token,train_indic,train_theta_kl,train_phi_theta]
     # valid_res=[valid_loss,valid_token,valid_indic,valid_theta_kl,valid_phi_theta]    
-    test_res=[[]]
+    # test_res=[[]]
     train_res={"train_loss":train_loss,"train_token":train_token,"train_indic":train_indic,"train_theta_kl":train_theta_kl,"train_phi_theta":train_phi_theta,"train_ppl":train_ppl,"train_acc":train_acc,"train_theta_ent":train_theta_ent,"train_phi_ent":train_phi_ent}
     valid_res={"valid_loss":valid_loss,"valid_token":valid_token,"valid_indic":valid_indic,"valid_theta_kl":valid_theta_kl,"valid_phi_theta":valid_phi_theta,"valid_ppl":valid_ppl,"valid_switch":valid_switch,"valid_acc":valid_acc,"valid_theta_ent":valid_theta_ent,"valid_phi_ent":valid_phi_ent}
+
 
     print('\n')
     print("train ==> loss: {:.4f}, token: {:.4f}, indicator: {:.4f} , theta_kl: {:.4f}, phi_theta: {:.4f}, switch:{:.4f}, ppl: {:.4f}, theta_ent: {:.4f}, phi_ent: {:.4f}, acc: {:.4f}".format(train_loss,train_token,train_indic,train_theta_kl,train_phi_theta,train_switch,train_ppl,train_theta_ent,train_phi_ent,train_acc))
@@ -405,6 +417,8 @@ class Train(object):
     # self.writer = tf.summary.FileWriter(os.path.join(self.params["save_dir"], "train"), sess.graph)
     train_dict={"train_loss":[],"train_token":[],"train_indic":[],"train_theta_kl":[],"train_phi_theta":[],"train_acc":[],"train_theta_ent":[],"train_phi_ent":[]}
     valid_dict={"valid_loss":[],"valid_token":[],"valid_indic":[],"valid_theta_kl":[],"valid_phi_theta":[],"valid_ppl":[],"valid_switch":[],"valid_acc":[],"valid_theta_ent":[],"valid_phi_ent":[]}
+    test_dict={"test_ppl":[]}
+
     # valid_loss_all={"valid_loss":[],"valid_token":[],"valid_indic":[],"valid_theta_kl":[],"valid_phi_theta":[]}
 
     for i in range(self.params["num_epochs"]):
@@ -415,13 +429,15 @@ class Train(object):
         valid_dict[key].append(valid_res[key])
       if i==(self.params["num_epochs"]-1):
         beta_list,beta_values=print_top_words(beta, list(zip(*sorted(vocab.items(), key=lambda x: x[1])))[0],name_beta="")            
+        for key in test_dict:
+          test_dict[key].append(test_res[key])        
     dir_path = os.path.dirname(os.path.realpath(__file__))
     with open(os.path.join(dir_path+"/"+self.params["save_dir"], save_info[1]+".pkl"), "wb") as f:
       beta_dict={"beta_names":beta_list,"beta_values":beta_values}
       generated={"gen_text":output_text}
       assigned_topics={"non_topics":non_topics}
       original_text={"original_text":original_text}
-      pkl.dump([train_dict, valid_dict,beta_list,save_info[0],beta_dict,generated,assigned_topics,original_text], f)
+      pkl.dump([train_dict, valid_dict,test_dict,beta_list,save_info[0],beta_dict,generated,assigned_topics,original_text], f)
 
 
 

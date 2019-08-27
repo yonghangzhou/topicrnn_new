@@ -161,8 +161,8 @@ class vsTopic(object):
         }
     return outputs
 
-  def textGenerate(self,theta_gen):
-      self.theta_part=tf.reduce_sum(tf.expand_dims(tf.expand_dims(1-self.stop_prob,-1)*tf.expand_dims(theta_gen,1),-1)*self.token_ppx_non_prob,2)      
+  def textGenerate(self):
+      # self.theta_part=tf.reduce_sum(tf.expand_dims(tf.expand_dims(1-self.stop_prob,-1)*tf.expand_dims(theta_gen,1),-1)*self.token_ppx_non_prob,2)      
       pred_next_token_theta=dist.Categorical(probs=self.h_part+self.theta_part).sample()
       return pred_next_token_theta
 
@@ -184,7 +184,7 @@ class Train(object):
         "dropout":tf.placeholder(tf.float32,shape=None,name="dropout"),
         "model":" "    
         }
-    self.theta_gen=tf.placeholder(tf.float32, shape=[None, self.params["num_topics"]], name="theta_gen")    
+    # self.theta_gen=tf.placeholder(tf.float32, shape=[None, self.params["num_topics"]], name="theta_gen")    
 
   def build_graph(self):
     self._create_placeholder()
@@ -238,20 +238,30 @@ class Train(object):
     outputs = sess.run(outputs, feed_dict={self.inputs[k]: inputs[k] for k in self.inputs.keys() if k!="model"})
     return {keys[i]: outputs[i] for i in range(len(keys))}
 
+  def freq_calc(self,sample_input):
+    sample_input_list=sample_input.tolist()
+    return([[sample_input_list[0].count(word)*(1-self.params["stop_words"][word]) for word in sample_input_list[0]]])
 
-
-  def test_textGen(self, sess, input_idx,seq_len,reverse_vocab):
-    sample_input=input_idx
+  def test_textGen(self, sess):
+    sample_input_list=[[self.vocab['<EOS>'] for _ in range(self.params["max_seqlen"])]]          
+    sample_input=np.array(sample_input_list)
+    sample_frequency=self.freq_calc(sample_input)
+    # sample_input=input_idx
+    seq_len=self.params["generate_len"]
     for k in range(seq_len):
-      feed_dict_text={self.inputs["tokens"]:sample_input,self.inputs["targets"]:sample_input,self.inputs["length"]:[k+1],self.theta_gen:1./self.params["num_topics"]*np.ones((1,self.params["num_topics"]))}    
-      generated_idx = sess.run(self.model.textGenerate(self.theta_gen), feed_dict=feed_dict_text)    
-      revised_text=" ".join([reverse_vocab[sample_input[0][idx]] for idx in range(k+1)])
-      generated_text=" ".join([reverse_vocab[item] for item in generated_idx[0]])
+      # feed_dict_text={self.inputs["tokens"]:sample_input,self.inputs["targets"]:sample_input,self.inputs["length"]:[k+1],self.theta_gen:1./self.params["num_topics"]*np.ones((1,self.params["num_topics"]))}    
+      feed_dict_text={self.inputs["tokens"]:sample_input,self.inputs["targets"]:sample_input,self.inputs["frequency"]:sample_frequency,self.inputs["length"]:[k+1]}          
+      generated_idx = sess.run(self.model.textGenerate(), feed_dict=feed_dict_text)    
+      revised_text=" ".join([self.reverse_vocab[sample_input[0][idx]] for idx in range(k+1)])
+      generated_text=" ".join([self.reverse_vocab[item] for item in generated_idx[0]])
       sample_input[0][k+1]=generated_idx[0][k]
+      sample_frequency=self.freq_calc(sample_input)
     return revised_text
 
 
   def run_epoch(self, sess, datasets,train_num_batches,vocab,epoch_num):
+    self.vocab=vocab
+    self.reverse_vocab=dict(zip(vocab.values(),vocab.keys()))
 
 
     def switch_calc(topics_all,topics_non_idx):
@@ -276,7 +286,6 @@ class Train(object):
 
     dataset_train, dataset_dev, dataset_test = datasets
     # print('dataset_train_len',len(dataset_train))
-    reverse_vocab=dict(zip(vocab.values(),vocab.keys()))
     pbar=tqdm(range(train_num_batches))
     for _ in pbar:
       batch=next(dataset_train())      
@@ -312,8 +321,8 @@ class Train(object):
     self.original_text=[]
     print('epoch_num: ',epoch_num)
     if epoch_num==(self.params["num_epochs"]-1):
-      self.non_topics=[[([reverse_vocab[word] for word in item[2][item[1]>0]],item[0][item[1]>0]) for item in list(zip(topics_all[15:25],topics_non_idx[15:25],batch["targets"][15:25]))]][0]
-      self.original_text=[" ".join([reverse_vocab[word] for word in sentence]) for sentence in batch["targets"][15:25]]
+      self.non_topics=[[([self.reverse_vocab[word] for word in item[2][item[1]>0]],item[0][item[1]>0]) for item in list(zip(topics_all[15:25],topics_non_idx[15:25],batch["targets"][15:25]))]][0]
+      self.original_text=[" ".join([self.reverse_vocab[word] for word in sentence]) for sentence in batch["targets"][15:25]]
       # phi_vec=train_outputs["phi"][15][topics_non_idx[15]>0]
       # phi_entropy=[np.sum(-item*np.log(item)) for item in phi_vec]
       # print('theta_vec: ',train_outputs["theta"][15:18])
@@ -344,18 +353,8 @@ class Train(object):
 
     self.sample_text=[]
     if epoch_num==(self.params["num_epochs"]-1):
-      sample_input=np.array([[vocab['<EOS>'] for _ in range(self.params["max_seqlen"])]])
-      sample_input[0][0]=vocab['the']
-      sample_input=np.array(sample_input)
-      self.sample_text=self.test_textGen(sess, sample_input,self.params["generate_len"],reverse_vocab)    
+      self.sample_text=self.test_textGen(sess)    
       print('sample_text: ',self.sample_text,'\n')
-
-    # for batch in dataset_test():
-    #   test_outputs = self.batch_test(sess, batch)
-    #   test_loss.append(test_outputs["loss"])
-    #   test_theta.append(test_outputs["theta"])
-    #   test_repre.append(test_outputs["repre"])
-    #   test_ppl.append(test_outputs["token_ppl"])
 
     train_loss = np.mean(train_loss)
     train_token=np.mean(train_token)

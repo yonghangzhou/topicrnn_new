@@ -21,7 +21,7 @@ UNK_ID = 1
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--dataset", type=str, default="vist", help="dataset")
+parser.add_argument("--dataset", type=str, default="vist", help="dataset vist,imdb")
 parser.add_argument("--batch_size", type=int, default=200, help="batch size")
 parser.add_argument("--num_epochs", type=int, default=100, help="number of epochs")
 parser.add_argument("--frequency_limit", type=int, default=5, help="limit of repeat for vocabulary")
@@ -56,8 +56,12 @@ def load_dataset(params,frequency_limit):
     	stop_words = [line.strip() for line in f.readlines() if line.strip()]
     	stop_words.append(UNK)
     	stop_words.append(EOS)
-    with open(dir_path+"/datasets/VIST_max_dataset/train_data_dii_sis.txt", "r") as f:
-        words = f.read().replace("\n", "").split()         
+    if params.dataset=='vist':
+      with open(dir_path+"/datasets/VIST_max_dataset/train_data_dii_sis.txt", "r") as f:
+          words = f.read().replace("\n", "").split()         
+    elif params.dataset=='imdb':
+      with open(dir_path+"/datasets/imdb_unsup/train_imdb_unsup.txt", "r") as f:
+          words = f.read().replace("\n", "").split()               
 
     word_counter = collections.Counter(words).most_common()
     vocab_list=[]
@@ -88,9 +92,15 @@ def load_dataset(params,frequency_limit):
 
 
         return data
-    train_x = get_data(dir_path+"/datasets/VIST_max_dataset/train_data_dii_sis.txt",vocab,params.vocab_size)
-    valid_x = get_data(dir_path+"/datasets/VIST_max_dataset/val_data_dii_sis.txt",vocab,params.vocab_size)
-    test_x = get_data(dir_path+"/datasets/VIST_max_dataset/test_data_dii_sis.txt",vocab,params.vocab_size)
+    if params.dataset=='vist':        
+      train_x = get_data(dir_path+"/datasets/VIST_max_dataset/train_data_dii_sis.txt",vocab,params.vocab_size)
+      valid_x = get_data(dir_path+"/datasets/VIST_max_dataset/val_data_dii_sis.txt",vocab,params.vocab_size)
+      test_x = get_data(dir_path+"/datasets/VIST_max_dataset/test_data_dii_sis.txt",vocab,params.vocab_size)
+    elif params.dataset == "imdb":
+      train_x = get_data(dir_path+"/datasets/imdb_unsup/train_imdb_unsup.txt",vocab,params.vocab_size)
+      valid_x = get_data(dir_path+"/datasets/imdb_unsup/valid_imdb_unsup.txt",vocab,params.vocab_size)
+      test_x = get_data(dir_path+"/datasets/imdb_unsup/test_imdb_unsup.txt",vocab,params.vocab_size)
+
     stop_words_ids = set([vocab[k] for k in stop_words if k in vocab])
     train = train_x
     valid = valid_x
@@ -144,6 +154,8 @@ def iterator(data, stop_words_ids, params,vocab_wo_stop,dropout,vocab,model="tra
 def main():
   params = parser.parse_args()
   data_train, data_valid, data_test, vocab, stop_words_ids,vocab_wo_stop = load_dataset(params,frequency_limit=params.frequency_limit)
+  for item in str(vars(params)).split(','):
+    print(item)
 
   train_num_batches=len(data_train) // params.batch_size
   data_train = iterator(data_train, stop_words_ids, params,vocab_wo_stop,params.dropout,vocab,model="Train")
@@ -155,7 +167,7 @@ def main():
   params_str=str(vars(params))
 
   params.stop_words = np.asarray([1 if i in stop_words_ids else 0 for i in range(params.vocab_size)])
-  save_file_name='q_gen_com_k_'+str(params.num_topics)+'_prior_'+str(params.prior)+'_mixture_lambda_'+str(params.mixture_lambda)+'_nunt_'+str(params.num_units)
+  save_file_name=str(params.dataset)+'_q_gen_com_k_'+str(params.num_topics)+'_prior_'+str(params.prior)+'_nunt_'+str(params.num_units)
 
   save_info=[params_str,save_file_name]
 

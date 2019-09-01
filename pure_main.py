@@ -5,7 +5,8 @@ import numpy as np
 import sys
 # import model
 # import vsTopicModel
-import ComVsTopic
+# import ComVsTopic
+import pure_rnn
 
 # import debug_lda
 import tensorflow as tf
@@ -29,22 +30,11 @@ parser.add_argument("--max_seqlen", type=int, default=90, help="maximum sequence
 parser.add_argument("--num_units", type=int, default=200, help="num of units")
 parser.add_argument("--num_hidden", type=int, default=500, help="hidden units of inference network")
 parser.add_argument("--dim_emb", type=int, default=400, help="dimension of embedding")
-parser.add_argument("--num_topics", type=int, default=5, help="number of topics")
 parser.add_argument("--num_layers", type=int, default=2, help="number of layers")
 parser.add_argument("--learning_rate", type=float, default=1e-3, help="learning rate")
 parser.add_argument("--dropout", type=float, default=0.7, help="dropout")
-parser.add_argument("--lambda", type=float, default=1.0, help="coefficient for beta")
+
 parser.add_argument("--rnn_model", type=str, default="GRU", help="GRU,LSTM, RNN Cells ")
-
-
-parser.add_argument("--beta_batch", type=int, default=0, help="batch norm for beta ")
-parser.add_argument("--phi_batch", type=int, default=0, help="batch norm for phi ")
-parser.add_argument("--theta_batch", type=int, default=0, help="batch norm for theta ")
-parser.add_argument("--lstm_norm",type=int,default=0,help="Using LayerNormBasicLSTMCell instead of LSTMCell")
-parser.add_argument("--beta_sftmx",type=int,default=0,help="Adding Softmax to Beta matrix; (phi_batch flag should be 0 in this case)")
-parser.add_argument("--rnn_lim", type=int, default=0, help="adding coefficient for rnn ")
-parser.add_argument("--mixture_lambda",type=float,default=0.5,help="mixture paramater for combining h and beta")
-parser.add_argument("--prior",type=float,default=1.,help="gamma coefficient")
 parser.add_argument("--generate_len",type=int,default=85,help="The length of the sentence to generate")
 
 
@@ -169,7 +159,7 @@ def main():
   params_str=str(vars(params))
 
   params.stop_words = np.asarray([1 if i in stop_words_ids else 0 for i in range(params.vocab_size)])
-  save_file_name=str(params.dataset)+'_q_gen_com_k_'+str(params.num_topics)+'_prior_'+str(params.prior)+'_nunt_'+str(params.num_units)+'_h_'+str(params.rnn_model)
+  save_file_name=str(params.dataset)+'_pure_'+str(params.rnn_model)+'_nunt_'+str(params.num_units)
 
   save_info=[params_str,save_file_name]
 
@@ -177,7 +167,7 @@ def main():
   configproto.gpu_options.allow_growth = True
   configproto.allow_soft_placement = True
   with tf.Session(config=configproto) as sess:
-    train =  ComVsTopic.Train(vars(params))
+    train =  pure_rnn.Train(vars(params))
     train.build_graph()
 
     if params.init_from:
